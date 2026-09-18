@@ -24,6 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from llama_index.core.tools import FunctionTool
 
 from src.agent.registry import get_registry
+from src.config import get_env
 from src.observability.events import make_event
 from src.observability.sink import get_sink
 from src.storage.audit import AuditLog
@@ -48,6 +49,7 @@ class RequestContext:
         self._emit = contextvars.ContextVar("ctx_emit", default=None)
         self._datasources = contextvars.ContextVar("ctx_datasources", default=None)
         self._kbs = contextvars.ContextVar("ctx_kbs", default=None)
+        self._session = contextvars.ContextVar("ctx_session", default=None)
 
     @property
     def role(self):
@@ -73,19 +75,25 @@ class RequestContext:
     def kb_ids(self):
         return self._kbs.get()
 
+    @property
+    def session_id(self):
+        return self._session.get()
+
 
 _CTX = RequestContext()
 
 
 def set_ctx(role: str, request_id: str, tenant: Optional[str] = None, emit=None,
             datasource_ids: Optional[List[str]] = None,
-            kb_ids: Optional[List[str]] = None) -> None:
+            kb_ids: Optional[List[str]] = None,
+            session_id: Optional[str] = None) -> None:
     _CTX._role.set(role)
     _CTX._rid.set(request_id)
     _CTX._tenant.set(tenant)
     _CTX._emit.set(emit)
     _CTX._datasources.set(datasource_ids)
     _CTX._kbs.set(kb_ids)
+    _CTX._session.set(session_id)
 
 
 def clear_ctx() -> None:
@@ -95,6 +103,7 @@ def clear_ctx() -> None:
     _CTX._emit.set(None)
     _CTX._datasources.set(None)
     _CTX._kbs.set(None)
+    _CTX._session.set(None)
 
 
 def emit_step(event_type: str, **data) -> None:
@@ -294,6 +303,37 @@ class RAGTools:
 
     # ---------- 通用 ----------
 
+    def find_similar_images(self, top_k: int = 5) -> str:
+        """查找与当前会话中用户上传图片相似的图片或内容（以图搜图）。
+
+        当用户想「找相似图片」或选择此类选项时调用。
+        参数：top_k (int) 返回数量，默认 5
+        返回：JSON 数组，每项含 doc_name(来源)、modality(类型)、score(相似度)
+        """
+        import glob
+        import os
+
+        sid = _CTX.session_id
+        if not sid:
+            return json.dumps({"error": "当前会话没有上传图片"}, ensure_ascii=False)
+        folder = os.path.join(get_env()["UPLOAD_DIR"], "session_images")
+        matches = glob.glob(os.path.join(folder, f"{sid}.*"))
+        if not matches:
+            return json.dumps({"error": "当前会话还没有上传图片，请先在对话框上传图片"}, ensure_ascii=False)
+        path = max(matches, key=os.path.getmtime)
+        emb = self.hybrid.embedder.embed_items([{"modality": "image", "media_path": path}])[0]
+        where = {"tenant": _CTX.tenant} if _CTX.tenant else None
+        hits = self.hybrid.vector_store.query(emb, top_k=top_k, where=where)
+        items = [{
+            "node_id": h["node_id"],
+            "doc_name": (h.get("metadata") or {}).get("doc_name", ""),
+            "modality": (h.get("metadata") or {}).get("modality", "text"),
+            "score": round(float(h.get("score") or 0), 3),
+            "text": (h.get("text") or "")[:200],
+        } for h in hits]
+        emit_step("sources", items=[{k: it[k] for k in ("node_id", "doc_name", "modality", "score")} for it in items])
+        return json.dumps(items, ensure_ascii=False)
+
     def calculator(self, expression: str) -> str:
         """计算数学表达式（如 '2 + 3 * 4'）。检索到数字后常用。"""
         import ast
@@ -365,6 +405,7 @@ class RAGTools:
             ("list_datasources", self.list_datasources, ["member", "admin"]),
             ("describe_table", self.describe_table, ["member", "admin"]),
             ("sql_query", self.sql_query, ["member", "admin"]),
+            ("find_similar_images", self.find_similar_images, ["member", "admin"]),
             ("calculator", self.calculator, ["member", "admin"]),
         ]
         tools = []

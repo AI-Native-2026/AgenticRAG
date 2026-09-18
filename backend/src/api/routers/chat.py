@@ -41,7 +41,7 @@ async def chat(request: Request, body: ChatRequest):
     if not body.stream:
         from src.agent.tools import clear_ctx, set_ctx
         set_ctx(role=user["role"], request_id=request_id, tenant=user["tenant"],
-                kb_ids=body.kb_ids, datasource_ids=body.datasource_ids)
+                kb_ids=body.kb_ids, datasource_ids=body.datasource_ids, session_id=body.session_id)
         try:
             result = await svc.rag.achat(agent, body.session_id, body.question, tenant=user["tenant"])
         finally:
@@ -144,6 +144,15 @@ async def chat_image(request: Request, file: UploadFile = File(...), question: s
     with open(tmp, "wb") as f:
         f.write(await file.read())
 
+    # 持久化本次会话的图片，供后续文本轮次调用 find_similar_images 使用
+    try:
+        import shutil
+        img_dir = os.path.join(svc.env["UPLOAD_DIR"], "session_images")
+        os.makedirs(img_dir, exist_ok=True)
+        shutil.copyfile(tmp, os.path.join(img_dir, f"{session_id}{suffix}"))
+    except Exception:  # noqa: BLE001
+        pass
+
     try:
         # 1) 图片 OCR（提取图中文字）
         ocr_text = ""
@@ -182,8 +191,10 @@ async def chat_image(request: Request, file: UploadFile = File(...), question: s
         q = question.strip() or "请描述这张图片的内容。"
         prompt = (
             "你是小K，企业的知识中台助手。用户上传了一张图片并提问。"
-            "下面是系统针对该图片得到的信息（OCR 文本与知识库检索结果），请据此回答用户问题；"
-            "若信息不足，如实说明。用中文、Markdown 排版，不要输出角色前缀。\n\n"
+            "本平台**具备图片能力**：支持以图搜图与图片问答。若用户想找相似图片，"
+            "请说明可点击对话框的「以图搜图」按钮，或让我用 find_similar_images 查找；"
+            "不要建议用户去 Google/百度 等外部工具。请优先依据图片本身内容回答，"
+            "下方另有系统检索到的相关内容可参考。用中文、Markdown 排版，不要输出角色前缀。\n\n"
             f"{context}\n\n用户问题：{q}"
         )
         # 优先用视觉模型（Qwen2.5-VL）直接理解图片；失败则回退 OCR + 文本模型

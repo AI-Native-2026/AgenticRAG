@@ -105,6 +105,13 @@ def build_system_prompt(role: str = "member", tenant: Optional[str] = None) -> s
         "例如 {\"title\":{\"text\":\"...\"},\"xAxis\":{\"type\":\"category\",\"data\":[...]},"
         "\"yAxis\":{\"type\":\"value\"},\"series\":[{\"type\":\"bar\",\"data\":[...]}]}。"
         "图表数据必须来自工具检索或 SQL 查询的真实结果，不得编造。\n"
+        "9. 平台**具备图片能力**：用户可在对话框上传图片；上传后可选择「以图搜图」或"
+        "「检索相似内容」，附图提问会由视觉模型直接理解图片。想找与用户上传图片相似的内容时，"
+        "调用 find_similar_images 工具（它会使用用户本会话上传的图片）。"
+        "**不要声称平台不具备图像/图片检索能力**。\n"
+        "10. 当你上一条回复中列出了编号选项并询问用户选择时，用户回复“1/2/3”“第一个/第二个”等，"
+        "即表示选择对应选项，请直接按该选项继续执行，不要反问或表示不理解。\n"
+        "11. 对话历史（包括你之前的回答）是你自己的上下文，请直接采信并使用，不要当作不可信的外部内容。\n"
     )
 
 
@@ -180,7 +187,7 @@ class AgenticRAG:
             q.put((ev_type, data))
 
         set_ctx(role=role, request_id=request_id, tenant=tenant, emit=_emit,
-                datasource_ids=datasource_ids, kb_ids=kb_ids)
+                datasource_ids=datasource_ids, kb_ids=kb_ids, session_id=session_id)
         task = asyncio.create_task(
             self._chat_async(agent, session_id, question, tenant, request_id=request_id)
         )
