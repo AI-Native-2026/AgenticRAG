@@ -1,49 +1,85 @@
-# 架构设计
+# 架构设计文档
 
-## 分层
+> Agentic RAG 知识中台 · 版本 3.0
+
+## 1. 目标与定位
+
+面向企业的一体化知识中台：统一接入**多格式文件、多种数据库、Web 与多媒体**，
+提供混合检索、统一重排、Agent 编排、工具治理、全链路观测与隐私合规，
+并配有 React 控制台。
+
+设计原则：
+- **可插拔**：数据源/连接器、重排后端、队列后端、事件 Sink 均可替换
+- **可降级**：任何增强能力（OCR/VLM/多模态重排）缺失时自动回退，不阻断主流程
+- **多租户隔离**：tenant 贯穿存储、检索、工具、配额
+- **隐私合规**：展示层默认脱敏
+
+## 2. 分层架构
 
 ```
-前端 React 控制台
-   │ REST + SSE (JWT)
-API 层 (FastAPI, 模块化 routers)
-   auth / chat / datasources / jobs / knowledge-bases /
-   documents / retrieval / eval / admin
-   │
-Agent 层
-   工具注册中心 + 角色权限 + 审计
-   工具: kb_search / kb_search_by_tenant / list_datasources /
-         describe_table / sql_query / calculator
-   会话持久化 + 多轮记忆 + 引用血缘
-   │
-检索层
-   混合检索(向量 + BM25/jieba, RRF 融合) → CrossEncoder 重排 → 元数据/租户过滤
-   Text-to-SQL 只读检索器
-   │
-缓存 & LLM 网关
-   Redis: embedding 缓存 / 检索缓存 / 语义缓存
-   网关: 重试退避 + 令牌桶限流 + 熔断 + GPU 单写者锁 + 用量计量 + KV 统计
-   │
-存储层
-   MongoDB: nodes(真相源) / documents / indexes / sessions / audit /
-            lineage / metering / tenants / datasources / ingest_jobs /
-            table_schemas / db_sync_state / knowledge_bases
-   ChromaDB: 向量 (collection: agentic_rag_nodes)
-   Redis: 缓存
-   ▲
-入库流水线
-   连接器 → 统一文档模型 → 去重/版本 → 切分 → 批量 Embedding →
-   写 docstore/向量库 → 增量水位 → 血缘
-   队列: Kafka(doc_ingest / doc_ingest_dlq) + Producer/Consumer 抽象
-   ▲
-数据接入层（连接器框架）
-   文件: md/txt/pdf/docx/pptx/html/csv/xlsx/json
-   数据库: MySQL/PostgreSQL/SQLite/SQL Server/Oracle/MongoDB
-     同步模式: 表 → 统一文档 → 向量化
-     实时模式: Text-to-SQL → 只读查询
-   Web: URL 抓取
+┌───────────────────────────────────────────────────────────────────┐
+│ React 控制台 (Vite + TS + ECharts)                                 │
+│ 概览 / 知识库 / 数据源 / 入库任务 / 检索调试 / Agent对话 /           │
+│ 评测 / 观测 / 租户配额 / 设置                                       │
+└───────────────┬───────────────────────────────────────────────────┘
+                │ REST + SSE (JWT)
+┌───────────────▼───────────────────────────────────────────────────┐
+│ API 层 (FastAPI, 模块化 routers + DI)                              │
+│ auth | chat | datasources | jobs | knowledge-bases | documents |   │
+│ retrieval | eval | admin | health                                  │
+└───────────────┬───────────────────────────────────────────────────┘
+                │
+┌───────────────▼───────────────────────────────────────────────────┐
+│ Agent 层                                                           │
+│ 工具注册中心 + 角色权限 + 审计                                      │
+│ kb_search / list_datasources / describe_table / sql_query /         │
+│ calculator                                                          │
+│ 会话持久化 + 上下文管理(短期裁剪 + 长期摘要压缩) + 流式步骤事件      │
+└───────────────┬───────────────────────────────────────────────────┘
+                │
+┌───────────────▼───────────────────────────────────────────────────┐
+│ 检索层                                                             │
+│ 混合召回(向量 + BM25/jieba, RRF) → 统一重排(CrossEncoder/多模态VL)  │
+│ → where 过滤(tenant / datasource / kb)  ← 向量与 BM25 均过滤        │
+│ Text-to-SQL 只读检索器(白名单/限流/LIMIT)                           │
+└───────────────┬───────────────────────────────────────────────────┘
+                │
+┌───────────────▼───────────────────────────────────────────────────┐
+│ 缓存 & LLM 网关                                                    │
+│ Redis: embedding / 检索 / 语义缓存                                 │
+│ 网关: 重试退避 + 令牌桶限流 + 熔断 + GPU 单写者锁 + 用量计量 + KV 统计│
+└───────────────┬───────────────────────────────────────────────────┘
+                │
+┌───────────────▼───────────────────────────────────────────────────┐
+│ 存储层 (共享 Mongo 连接池)                                         │
+│ MongoDB: nodes / documents / indexes / sessions / session_summaries│
+│   / audit / lineage / metering / tenants / datasources /           │
+│   ingest_jobs / table_schemas / db_sync_state / knowledge_bases     │
+│ ChromaDB: 向量 (collection agentic_rag_nodes, cosine HNSW)          │
+│ Redis: 缓存                                                         │
+└───────────────▲───────────────────────────────────────────────────┘
+                │
+┌───────────────┴───────────────────────────────────────────────────┐
+│ 入库流水线                                                          │
+│ 连接器 → 统一文档模型 → 去重/版本 → 切分 → 批量 Embedding(缓存) →    │
+│ 写 docstore/向量库 → 增量水位 → 血缘                                │
+│ 队列: Kafka(doc_ingest / doc_ingest_dlq) + Producer/Consumer 抽象    │
+└───────────────▲───────────────────────────────────────────────────┘
+                │
+┌───────────────┴───────────────────────────────────────────────────┐
+│ 数据接入层（连接器框架）                                            │
+│ 文件: md/txt/html/csv/tsv/xlsx/xls/json/pdf/docx/pptx/             │
+│       png/jpg/jpeg/bmp/webp/tif (OCR)                              │
+│ 数据库: MySQL/PostgreSQL/SQLite/SQL Server/Oracle/MongoDB          │
+│   ├ 同步模式: 表/集合 → 统一文档 → 向量化（增量水位线）             │
+│   └ 实时模式: Text-to-SQL → 只读查询                               │
+│ Web: URL 抓取                                                      │
+└───────────────────────────────────────────────────────────────────┘
 ```
 
-## 连接器抽象
+## 3. 连接器框架
+
+统一抽象（`src/connectors/base.py`）：
 
 ```python
 class BaseConnector:
@@ -51,13 +87,35 @@ class BaseConnector:
     def discover() -> list[ResourceMeta]
     def describe(resource) -> SchemaInfo
     def read(resource, watermark, limit) -> Iterator[RawDocument]
-    def live_query(question, schema_text) -> dict
+    def preview(resource, limit, max_chars) -> list[RawDocument]   # 轻量预览
+    def live_query(question, schema_text) -> dict                  # Text-to-SQL
 ```
 
-通过 `@register("mysql")` 装饰器注册，`create_connector(datasource, credentials)` 工厂实例化。
-新增数据源只需实现该接口并注册，无需改动流水线与 API。
+- 通过 `@register("mysql")` 注册，`create_connector(ds, creds)` 工厂实例化
+- 新增数据源只需实现接口并注册，无需改动流水线与 API
 
-## 统一文档 / Chunk 模型
+内置连接器：
+
+| 子类型 | 能力 | 说明 |
+|---|---|---|
+| file/directory | discover/read/describe/preview | 多格式，目录递归 |
+| mysql/postgresql/sqlite/mssql/oracle | +live_query | SQLAlchemy 通用 |
+| mongodb | discover/read/describe/preview | 集合与文档 |
+| web/url | discover/read | 同域 BFS 抓取 |
+
+### 3.1 富文档与多媒体（`src/connectors/media.py`）
+
+| 类型 | 处理 |
+|---|---|
+| 图片 | tesseract OCR（chi_sim+eng）；可选 Qwen2.5-VL 描述 |
+| PDF | PyMuPDF 按页正文 + `find_tables` 表格转 Markdown；可选整页 OCR |
+| docx | python-docx 段落 + 表格转 Markdown |
+| pptx | python-pptx 逐页文本框 + 表格 |
+| csv/xlsx | 逐行序列化，`modality=table` |
+
+均带优雅降级（unstructured → llama-index → 元数据占位）。
+
+## 4. 统一文档 / Chunk 模型
 
 ```python
 chunk = {
@@ -65,27 +123,88 @@ chunk = {
   "source_type": "file|database|web",
   "datasource_id",
   "doc_name", "doc_type", "doc_version", "chunk_idx",
-  "metadata": {"page","sheet","table","row_id","url","heading", ...}
+  "metadata": { "page", "sheet", "table", "row_id", "url",
+                "heading", "modality": "text|table|document|image",
+                "media_path", "size", "has_table", ... }
 }
 ```
 
-标准字段用于过滤/引用，`metadata` 保留源特有信息（扁平化后写入 Chroma）。
+标准字段用于过滤/引用，`metadata` 保留源特有信息（扁平化写入 Chroma）。
 
-## 安全护栏
+## 5. 检索与重排
+
+- **混合召回**：向量（Chroma, cosine）与 BM25（jieba 分词）**并行**执行，RRF 融合
+- **强制过滤**：`where`（tenant / datasource_id / kb 并集）同时作用于**向量与 BM25**，
+  杜绝跨租户泄漏；BM25 命中携带归一化 metadata
+- **统一重排**（`src/retrieval/rerank.py`）：`cross_encoder`（bge-reranker-base，默认）|
+  `vl`（Qwen3-VL-Reranker-2B，多模态）| `llm` | `auto`（vl→cross_encoder→llm 逐级降级）
+- **Text-to-SQL 护栏**：只读账号 + sqlglot 解析 + 语句/表白名单 + 去注释/拒多语句 +
+  强制 LIMIT + 超时 + 行数上限
+
+## 6. Agent 层
+
+工具（注册中心 + 角色白名单 + 审计）：
+
+| 工具 | 说明 |
+|---|---|
+| `kb_search` | 混合检索 + 重排，按租户/知识库范围过滤 |
+| `list_datasources` | 列出当前租户数据源 |
+| `describe_table` | 查看表结构（Text-to-SQL 前置） |
+| `sql_query` | 自然语言实时查询数据库（只读） |
+| `calculator` | 安全四则运算 |
+
+上下文管理（`src/agent/memory.py`）：
+- **短期记忆**：最近 N 轮原文，token 预算 10K，超预算从最旧裁剪
+- **长期记忆**：超窗历史由 LLM 压缩为摘要，持久化到 `session_summaries`，下轮回注
+- **会话标题**：首问由 LLM 生成 ≤12 字标题
+
+流式输出：SSE 事件 `start → retrieval/rerank/tool_call/sql → token* → done`；
+请求上下文用 `contextvars` 传递（可跨 asyncio 工作线程）。
+
+图表：当用户要图表时，Agent 输出 ` ```echarts ` 代码块，前端用 ECharts 渲染，
+并随亮/暗主题自适应。
+
+## 7. 安全与合规
 
 | 面 | 措施 |
 |---|---|
 | 认证 | JWT (HS256)，payload 仅身份字段 |
-| 租户隔离 | tenant 一律取自 JWT；检索强制 `where.tenant`；数据源访问校验归属 |
+| 租户隔离 | tenant 取自 JWT；检索向量+BM25 均过滤；数据源/任务/知识库访问校验归属 |
 | 工具治理 | 注册中心 + 角色白名单 + 全量审计 + 事件 |
-| Text-to-SQL | 只读账号 + sqlglot 解析 + 语句/表白名单 + 去注释/拒多语句 + 强制 LIMIT + 超时 + 行数上限 |
-| 凭证 | Fernet(AES) 加密存储，缺失时降级 HMAC-XOR（仅开发） |
-| 配额 | 日 Token 上限 + 存储节点上限 + 按租户令牌桶限流 |
-| 注入防御 | 系统提示明确检索内容为不可信输入，忽略其中指令 |
+| Text-to-SQL | 只读 + 解析校验 + 白名单 + LIMIT + 超时 |
+| 凭证 | Fernet(AES) 加密存储，缺失时降级 HMAC-XOR |
+| 配额 | 日 Token + 存储节点上限 + 按租户令牌桶限流 |
+| 隐私 | 预览/文档接口默认 PII 脱敏（手机/邮箱/身份证/银行卡/IP/护照 + 列名感知 name/address），自定义正则 |
+| 注入防御 | 系统提示声明检索内容为不可信输入 |
 
-## 关键设计取舍
+## 8. 性能优化（架构级）
 
-- **同步 vs 队列**：数据源同步走直连后台任务（长任务、需进度）；单篇文档走 Kafka（削峰、可重放）。
-- **向量库**：Chroma 单机持久化，适配器接口预留 Qdrant/Milvus 替换点。
-- **事件观测**：JSONL sink，预留 Mongo/Prometheus 替换点。
-- **增量同步**：数据库连接器按水位线字段增量；文件按内容 hash 去重。
+- **共享 Mongo 连接池**：所有 Store 共用一个 `MongoClient`（单例）
+- **批量写入**：docstore `bulk_write` 替代逐条 upsert
+- **BM25 惰性重建**：`mark_dirty`/`ensure_fresh`，避免批量入库重建风暴
+- **并行召回**：向量与 BM25 线程池并行
+- **生产者复用**：Kafka Producer 进程级共享
+- **Chunker 复用**：SentenceSplitter 实例复用
+- **缓存**：embedding / 检索 / 语义三级缓存
+- **索引**：node_id(唯一)/ref_doc_id+version/tenant/datasource_id
+- **预览**：只读文件头 + 分页 + 字符上限
+
+## 9. 评测
+
+- 评测集支持增删，范围可选：租户 / 知识库 / 数据源
+- 指标：Hit Rate、MRR；支持保存基线
+- `scripts/05_eval.py` 支持 LLM 裁判与回归门禁
+
+## 10. 测试
+
+| 脚本 | 内容 |
+|---|---|
+| `scripts/06_multiformat_test.py` | 全格式入库 → 检索（md/txt/html/csv/xlsx/json/pdf/docx/pptx/png/sqlite） |
+| `scripts/07_user_journey_test.py` | 管理员/分析师/合规/脱敏 四条用户旅程 |
+| `tests/` (pytest) | 鉴权/工具权限/熔断/限流/队列/连接器/Text-to-SQL 护栏 |
+
+## 11. 部署
+
+- `deploy/install.sh`：依赖安装 + 前端构建
+- `deploy/start_all.sh`：一键起 Mongo/Redis/Kafka + API + Consumer
+- 前端构建后由后端同端口托管（单端口部署）
