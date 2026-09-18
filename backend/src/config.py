@@ -126,6 +126,8 @@ def get_env() -> Dict[str, Any]:
     config["TESSERACT_LANG"] = _get("TESSERACT_LANG", "chi_sim+eng")
     config["IMAGE_VLM_ENABLED"] = _get("IMAGE_VLM_ENABLED", "false").lower() == "true"
     config["VLM_MODEL_PATH"] = _get("VLM_MODEL_PATH", "/root/autodl-tmp/models/Qwen2.5-VL-3B-Instruct")
+    config["VLM_CHAT_ENABLED"] = _get("VLM_CHAT_ENABLED", "true").lower() == "true"
+    config["VLM_DEVICE"] = _get("VLM_DEVICE", "auto")   # auto | cuda | cpu
     config["PDF_OCR_ENABLED"] = _get("PDF_OCR_ENABLED", "false").lower() == "true"
 
     # ---- 多模态模型（可选） ----

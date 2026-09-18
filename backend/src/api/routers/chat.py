@@ -1,6 +1,7 @@
 """对话路由（流式 SSE + 非流式 + 图片问答）。"""
 
 import json
+import logging
 import os
 import tempfile
 from typing import AsyncIterator
@@ -15,6 +16,7 @@ from src.observability.events import make_event, new_request_id
 from src.observability.sink import get_sink
 
 router = APIRouter(prefix="/v1", tags=["chat"])
+logger = logging.getLogger(__name__)
 
 
 def _prepare(request: Request):
@@ -183,7 +185,18 @@ async def chat_image(request: Request, file: UploadFile = File(...), question: s
             "若信息不足，如实说明。用中文、Markdown 排版，不要输出角色前缀。\n\n"
             f"{context}\n\n用户问题：{q}"
         )
-        answer = str(await svc.rag.llm.acomplete(prompt))
+        # 优先用视觉模型（Qwen2.5-VL）直接理解图片；失败则回退 OCR + 文本模型
+        answer = ""
+        if svc.env.get("VLM_CHAT_ENABLED", True):
+            try:
+                import asyncio
+
+                from src.llm.vision import answer_image
+                answer = await asyncio.to_thread(answer_image, tmp, q)
+            except Exception as e:  # noqa: BLE001
+                logger.warning("VLM 问答失败，回退文本模型: %s", e)
+        if not answer:
+            answer = str(await svc.rag.llm.acomplete(prompt))
 
         async def gen() -> AsyncIterator[str]:
             yield sse_event("start", {"request_id": request_id})

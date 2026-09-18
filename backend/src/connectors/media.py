@@ -56,18 +56,8 @@ def image_meta(path: Path) -> Dict[str, Any]:
 def describe_image_vlm(path: Path, model_path: str) -> str:
     """可选：用 Qwen2.5-VL 生成图片描述（较慢，默认关闭）。"""
     try:
-        import torch
-        from src.llm.vision import get_vlm  # 惰性单例
-        model, processor = get_vlm(model_path)
-        messages = [{"role": "user", "content": [
-            {"type": "image", "image": str(path)},
-            {"type": "text", "text": "请用中文简要描述这张图片的内容，并提取其中的文字。"},
-        ]}]
-        text = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-        inputs = processor(text=[text], images=[str(path)], return_tensors="pt").to(model.device)
-        with torch.no_grad():
-            out = model.generate(**inputs, max_new_tokens=256)
-        return processor.batch_decode(out[:, inputs.input_ids.shape[1]:], skip_special_tokens=True)[0].strip()
+        from src.llm.vision import caption_image
+        return caption_image(str(path))
     except Exception as e:  # noqa: BLE001
         logger.warning("VLM 描述失败: %s", e)
         return ""
