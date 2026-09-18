@@ -153,11 +153,6 @@ export default function Chat() {
                         ? <MarkdownView content={m.content} />
                         : (m.streaming ? <span className="typing"><span /><span /><span /></span> : '')}
                   </div>
-                  {m.steps.map((s, j) => (
-                    <div className="tool-call" key={j}>
-                      <div className="tc-head">{s.tool}{s.ok === false ? ' · 失败' : s.ok ? ' · 成功' : ''}{s.detail ? ` · ${s.detail}` : ''}</div>
-                    </div>
-                  ))}
                 </div>
               </div>
             ))}

@@ -34,9 +34,10 @@ function themeBase() {
 }
 
 /** 把主题样式合并进 LLM 给出的 option（不覆盖数据与系列定义）。 */
-function decorateOption(option: any) {
+function decorateOption(option: any, isDark: boolean) {
   if (!option || typeof option !== 'object') return option
   const { base, axis } = themeBase()
+  const text = cssVar('--text', isDark ? '#e7eaf0' : '#0f172a')
   const mergeAxis = (a: any) => {
     if (Array.isArray(a)) return a.map(mergeOne)
     return a ? mergeOne(a) : a
@@ -48,6 +49,15 @@ function decorateOption(option: any) {
     axisLine: { ...axis.axisLine, ...(a.axisLine || {}) },
     splitLine: { ...axis.splitLine, ...(a.splitLine || {}) },
   })
+  const mergeSeries = (s: any) => {
+    const one = (x: any) => ({
+      ...x,
+      label: { color: text, ...(x.label || {}) },
+      // 折线/柱状的数据标签与轴线文字统一为主题前景色
+      emphasis: { ...(x.emphasis || {}), label: { color: text, ...((x.emphasis || {}).label || {}) } },
+    })
+    return Array.isArray(s) ? s.map(one) : s ? one(s) : s
+  }
   return {
     ...base,
     ...option,
@@ -57,6 +67,7 @@ function decorateOption(option: any) {
     tooltip: { ...base.tooltip, ...(option.tooltip || {}), textStyle: { ...base.tooltip.textStyle, ...((option.tooltip || {}).textStyle || {}) } },
     xAxis: mergeAxis(option.xAxis),
     yAxis: mergeAxis(option.yAxis),
+    series: mergeSeries(option.series),
   }
 }
 
@@ -65,11 +76,12 @@ function EChart({ option, height = 300 }: { option: any; height?: number }) {
   const ref = useRef<HTMLDivElement>(null)
   const chartRef = useRef<echarts.ECharts | null>(null)
   const theme = useTheme((s) => s.theme)
+  const isDark = theme === 'dark'
 
-  // 主题切换时重建实例，确保颜色完全刷新
+  // 主题切换时重建实例，并切换 ECharts 内置 dark 主题，确保颜色完全刷新
   useEffect(() => {
     if (!ref.current) return
-    chartRef.current = echarts.init(ref.current)
+    chartRef.current = echarts.init(ref.current, isDark ? 'dark' : undefined)
     const onResize = () => chartRef.current?.resize()
     window.addEventListener('resize', onResize)
     return () => {
@@ -77,14 +89,14 @@ function EChart({ option, height = 300 }: { option: any; height?: number }) {
       chartRef.current?.dispose()
       chartRef.current = null
     }
-  }, [theme])
+  }, [isDark])
 
   useEffect(() => {
     if (chartRef.current && option) {
-      chartRef.current.setOption(decorateOption(option), true)
+      chartRef.current.setOption(decorateOption(option, isDark), true)
       chartRef.current.resize()
     }
-  }, [option, theme])
+  }, [option, isDark])
 
   return <div ref={ref} style={{ width: '100%', height }} data-testid="echart" />
 }
