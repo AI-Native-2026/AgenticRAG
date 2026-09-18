@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Plus, Send, Trash2, Image as ImageIcon } from 'lucide-react'
+import { Plus, Send, Trash2, Image as ImageIcon, X } from 'lucide-react'
 import { api, chatStream, searchByImage } from '@/api/client'
 import { toast } from '@/store/toast'
 import MarkdownView from '@/components/MarkdownView'
@@ -37,6 +37,7 @@ export default function Chat() {
   const [kbs, setKbs] = useState<any[]>([])
   const [selectedKbs, setSelectedKbs] = useState<string[]>([])
   const [imgBusy, setImgBusy] = useState(false)
+  const [pendingImage, setPendingImage] = useState<{ file: File; url: string } | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const imgRef = useRef<HTMLInputElement>(null)
 
@@ -105,8 +106,17 @@ export default function Chat() {
   }
 
   async function send() {
+    if (busy) return
+    if (pendingImage) {
+      const { file, url } = pendingImage
+      const caption = input.trim()
+      setPendingImage(null)
+      setInput('')
+      await runImageSearch(file, url, caption)
+      return
+    }
     const q = input.trim()
-    if (!q || busy) return
+    if (!q) return
     setInput('')
     setBusy(true)
     setMessages((m) => [...m, { role: 'user', content: q, steps: [] }, { role: 'bot', content: '', steps: [], streaming: true }])
@@ -147,11 +157,15 @@ export default function Chat() {
     }
   }
 
-  async function onPickImage(file?: File) {
+  function stageImage(file?: File) {
     if (!file) return
-    const url = URL.createObjectURL(file)
+    if (pendingImage) URL.revokeObjectURL(pendingImage.url)
+    setPendingImage({ file, url: URL.createObjectURL(file) })
+  }
+
+  async function runImageSearch(file: File, url: string, caption: string) {
     setMessages((m) => [...m,
-      { role: 'user', content: '', steps: [], image: url },
+      { role: 'user', content: caption, steps: [], image: url },
       { role: 'bot', content: '', steps: [], streaming: true }])
     scrollDown()
     setImgBusy(true)
@@ -235,14 +249,29 @@ export default function Chat() {
             )}
           </div>
 
+          {pendingImage && (
+            <div className="attach-bar">
+              <div className="attach-item">
+                <img src={pendingImage.url} alt="待发送图片" />
+                <div className="attach-info">
+                  <b>{pendingImage.file.name}</b>
+                  <span className="muted">已添加，点击「发送」开始以图搜图</span>
+                </div>
+                <button className="btn btn-g btn-xs" aria-label="移除图片"
+                  onClick={() => { URL.revokeObjectURL(pendingImage.url); setPendingImage(null) }}>
+                  <X size={13} />
+                </button>
+              </div>
+            </div>
+          )}
           <div className="chat-input">
             <input ref={imgRef} type="file" accept="image/*" style={{ display: 'none' }}
-              onChange={(e) => { onPickImage(e.target.files?.[0]); e.currentTarget.value = '' }} />
-            <button className="btn btn-o" title="上传图片以图搜图" aria-label="上传图片以图搜图"
+              onChange={(e) => { stageImage(e.target.files?.[0]); e.currentTarget.value = '' }} />
+            <button className="btn btn-o" title="添加图片（以图搜图）" aria-label="添加图片（以图搜图）"
               onClick={() => imgRef.current?.click()} disabled={busy || imgBusy} data-testid="chat-image">
               <ImageIcon size={16} />
             </button>
-            <textarea className="input" value={input} placeholder="输入问题，Enter 发送 / Shift+Enter 换行；点左侧图片按钮以图搜图"
+            <textarea className="input" value={input} placeholder="输入问题，Enter 发送 / Shift+Enter 换行；可先添加图片再发送以图搜图"
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }} />
             <button className="btn btn-p" onClick={send} disabled={busy} data-testid="chat-send"><Send size={15} /> 发送</button>
