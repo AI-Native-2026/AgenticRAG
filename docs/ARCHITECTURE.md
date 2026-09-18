@@ -141,6 +141,23 @@ chunk = {
 - **Text-to-SQL 护栏**：只读账号 + sqlglot 解析 + 语句/表白名单 + 去注释/拒多语句 +
   强制 LIMIT + 超时 + 行数上限
 
+### 5.1 多模态检索
+
+统一 Embedder（`src/llm/multimodal.py`）：
+
+| `EMBED_BACKEND` | 模型 | 能力 |
+|---|---|---|
+| `text`（默认） | bge-small-zh-v1.5 | 文本向量；图片走 OCR 文本 |
+| `vl` | Qwen3-VL-Embedding-8B（bf16） | 文本与图片映射到**同一向量空间** |
+
+- 入库时按节点类型 embedding：`modality=image` 的节点用图片本体，其余用文本
+- 查询侧同样经 Embedder，因此支持**以文搜图**与**以图搜图**
+- 向量元数据携带 `modality` / `media_path`，结果与对话引用可显示图片缩略图
+- 切换后端时需更换 `CHROMA_COLLECTION` 并重新同步（向量维度不同）
+
+以图搜图接口：`POST /v1/retrieval/search-by-image`（上传图片 → 视觉相似检索）；
+媒体访问：`GET /v1/media/{node_id}`（校验租户归属）。
+
 ## 6. Agent 层
 
 工具（注册中心 + 角色白名单 + 审计）：
@@ -208,3 +225,12 @@ chunk = {
 - `deploy/install.sh`：依赖安装 + 前端构建
 - `deploy/start_all.sh`：一键起 Mongo/Redis/Kafka + API + Consumer
 - 前端构建后由后端同端口托管（单端口部署）
+
+### 11.1 显存与多模态
+
+启用 `EMBED_BACKEND=vl`（Qwen3-VL-Embedding-8B，bf16 ≈ 16GB）时：
+
+- 单卡 24G 下 **API 与 Kafka 消费者不能同时加载该模型**（会 OOM）。
+  此时使用数据源同步入库（在 API 进程内完成），消费者可另起一卡或暂不启用。
+- 切换 embedding 后端会改变向量维度，需更换 `CHROMA_COLLECTION` 并重新同步；
+  同时清空 Redis 缓存（`redis-cli flushdb`）与 `documents` 去重表以强制重建。
