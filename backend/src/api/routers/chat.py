@@ -35,7 +35,8 @@ def _prepare(request: Request):
 async def chat(request: Request, body: ChatRequest):
     user, svc = _prepare(request)
     request_id = new_request_id()
-    agent = svc.rag.build_agent(role=user["role"], tenant=user["tenant"])
+    agent = svc.rag.build_agent(agent_type=svc.env.get("AGENT_TYPE", "function"),
+                                role=user["role"], tenant=user["tenant"])
 
     if not body.stream:
         from src.agent.tools import clear_ctx, set_ctx

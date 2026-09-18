@@ -108,6 +108,9 @@ def get_env() -> Dict[str, Any]:
     config["MEMORY_RECENT_TURNS"] = int(_get("MEMORY_RECENT_TURNS", "6"))        # 保留最近 N 轮原文
     config["MEMORY_SUMMARY_ENABLED"] = _get("MEMORY_SUMMARY_ENABLED", "true").lower() == "true"
 
+    # ---- Agent ----
+    config["AGENT_TYPE"] = _get("AGENT_TYPE", "function")   # function（原生工具调用）| react（文本推理）
+
     # ---- 预览性能 ----
     config["PREVIEW_MAX_CHARS"] = int(_get("PREVIEW_MAX_CHARS", "2000"))         # 单条预览最大字符
     config["PREVIEW_PAGE_SIZE"] = int(_get("PREVIEW_PAGE_SIZE", "10"))           # 文件列表每页
