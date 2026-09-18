@@ -3,6 +3,11 @@
 企业级知识中台：统一接入**多格式文件、多种数据库、Web 与多媒体**，提供混合检索、
 统一重排、Agent 编排、工具治理、全链路观测与隐私合规，并配有 React 控制台。
 
+![Agent 对话 · 各商品订单数量占比](imgs/agenticrag.png)
+
+> 控制台演示：在 **Agent 对话**中提问「各商品的订单数量占比」，小K 自动调用
+> `sql_query` 查询数据库，并输出 **ECharts 饼图**展示结果。
+
 ## 核心能力
 
 - **多格式接入**：md/txt/html/csv/xlsx/json/pdf/docx/pptx + 图片(OCR) + Web
