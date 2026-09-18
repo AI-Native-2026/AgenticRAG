@@ -3,6 +3,7 @@ import { Plus, Send, Trash2 } from 'lucide-react'
 import { api, chatStream } from '@/api/client'
 import { toast } from '@/store/toast'
 import MarkdownView from '@/components/MarkdownView'
+import KnowledgeScope from '@/components/KnowledgeScope'
 
 interface ToolStep { tool: string; ok?: boolean; duration_ms?: number; detail?: string }
 interface Message { role: 'user' | 'bot'; content: string; steps: ToolStep[]; streaming?: boolean }
@@ -87,10 +88,6 @@ export default function Chat() {
     } catch (err: any) { toast.err(err.message) }
   }
 
-  function toggleKb(id: string) {
-    setSelectedKbs((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id])
-  }
-
   async function send() {
     const q = input.trim()
     if (!q || busy) return
@@ -167,13 +164,10 @@ export default function Chat() {
           </div>
 
           <div className="kb-scope">
-            <span className="lbl">检索范围</span>
-            <button className={`chip ${selectedKbs.length === 0 ? 'active' : ''}`} onClick={() => setSelectedKbs([])}>全部知识库</button>
-            {kbs.map((k) => (
-              <button key={k.kb_id} className={`chip ${selectedKbs.includes(k.kb_id) ? 'active' : ''}`}
-                onClick={() => toggleKb(k.kb_id)}>{k.name}</button>
-            ))}
-            {kbs.length === 0 && <span className="muted">暂无知识库</span>}
+            <KnowledgeScope kbs={kbs} value={selectedKbs} onChange={setSelectedKbs} />
+            {selectedKbs.length > 0 && (
+              <span className="muted">已限定 {selectedKbs.length} 个知识库</span>
+            )}
           </div>
 
           <div className="chat-input">
