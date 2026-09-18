@@ -56,7 +56,6 @@ def image_meta(path: Path) -> Dict[str, Any]:
 def describe_image_vlm(path: Path, model_path: str) -> str:
     """可选：用 Qwen2.5-VL 生成图片描述（较慢，默认关闭）。"""
     try:
-        from transformers import AutoProcessor
         import torch
         from src.llm.vision import get_vlm  # 惰性单例
         model, processor = get_vlm(model_path)
