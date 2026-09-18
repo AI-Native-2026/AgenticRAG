@@ -83,6 +83,7 @@ def delete_datasource(request: Request, ds_id: str):
             svc.cache.invalidate(ref)
     svc.docstore.col.delete_many({"datasource_id": ds_id})
     svc.schema_store.clear(ds_id)
+    svc.sync_state.col.delete_many({"datasource_id": ds_id})
     svc.datasource_store.delete(ds_id)
     svc.rebuild_bm25()
     return {"deleted": True, "ds_id": ds_id}

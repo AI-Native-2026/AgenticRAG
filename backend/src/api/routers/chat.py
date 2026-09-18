@@ -71,8 +71,26 @@ def list_sessions(request: Request):
     svc = request.app.state.svc
     col = svc.rag.sessions.col
     pipeline = [
-        {"$group": {"_id": "$session_id", "last": {"$max": "$ts"}, "count": {"$sum": 1}}},
+        {"$sort": {"ts": 1}},
+        {"$group": {
+            "_id": "$session_id",
+            "last": {"$max": "$ts"},
+            "count": {"$sum": 1},
+            "first_user": {"$first": {"$cond": [{"$eq": ["$role", "user"]}, "$content", "$$REMOVE"]}},
+        }},
         {"$sort": {"last": -1}}, {"$limit": 50},
     ]
-    return {"sessions": [{"session_id": d["_id"], "last": d["last"], "messages": d["count"]}
-                         for d in col.aggregate(pipeline)]}
+    out = []
+    for d in col.aggregate(pipeline):
+        title = (d.get("first_user") or "新会话")
+        out.append({"session_id": d["_id"], "last": d["last"], "messages": d["count"],
+                    "title": title[:40]})
+    return {"sessions": out}
+
+
+@router.delete("/sessions/{session_id}")
+def delete_session(session_id: str, request: Request):
+    get_bearer(request)
+    svc = request.app.state.svc
+    res = svc.rag.sessions.col.delete_many({"session_id": session_id})
+    return {"deleted": res.deleted_count, "session_id": session_id}

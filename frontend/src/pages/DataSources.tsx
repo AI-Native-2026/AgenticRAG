@@ -220,15 +220,16 @@ export default function DataSources() {
 }
 
 function DatasourceDrawer({ ds, onClose, onSynced }: { ds: Datasource | null; onClose: () => void; onSynced: () => void }) {
-  const [tab, setTab] = useState('Schema')
+  const [tab, setTab] = useState('连接配置')
   const [tables, setTables] = useState<TableSchema[] | null>(null)
   const [preview, setPreview] = useState<any[] | null>(null)
   const [job, setJob] = useState<Job | null>(null)
   const [mode, setMode] = useState('full')
+  const tabs = ds?.type === 'database' ? ['连接配置', 'Schema', '预览', '同步'] : ['连接配置', '预览', '同步']
 
   useEffect(() => {
     if (!ds) return
-    setTab('Schema'); setTables(null); setPreview(null); setJob(null)
+    setTab('连接配置'); setTables(null); setPreview(null); setJob(null)
   }, [ds])
 
   useEffect(() => {
@@ -275,7 +276,7 @@ function DatasourceDrawer({ ds, onClose, onSynced }: { ds: Datasource | null; on
             <span className="spacer" />
             <span className="muted">{ds.chunk_count} chunks</span>
           </div>
-          <Tabs tabs={['连接配置', 'Schema', '预览', '同步']} active={tab} onChange={setTab} />
+          <Tabs tabs={tabs} active={tab} onChange={setTab} />
 
           {tab === '连接配置' && (
             <>

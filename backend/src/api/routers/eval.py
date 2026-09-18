@@ -32,7 +32,44 @@ def _load_set() -> List[Dict[str, Any]]:
 @router.get("/set")
 def get_set(request: Request):
     get_bearer(request)
-    return {"items": _load_set(), "count": len(_load_set())}
+    items = _load_set()
+    return {"items": items, "count": len(items)}
+
+
+def _save_set(items: List[Dict[str, Any]]) -> None:
+    EVAL_FILE.parent.mkdir(parents=True, exist_ok=True)
+    lines = [json.dumps(it, ensure_ascii=False) for it in items]
+    EVAL_FILE.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+
+
+@router.post("/set")
+def add_item(request: Request, body: Dict[str, Any]):
+    """新增一条评测项：{query, golden_docs[], golden_keywords[]}。"""
+    get_bearer(request)
+    query = (body.get("query") or "").strip()
+    if not query:
+        from src.api.deps import AppError
+        raise AppError(400, "BAD_REQUEST", "query 不能为空")
+    items = _load_set()
+    items.append({
+        "query": query,
+        "golden_docs": body.get("golden_docs") or [],
+        "golden_keywords": body.get("golden_keywords") or [],
+    })
+    _save_set(items)
+    return {"count": len(items)}
+
+
+@router.delete("/set/{index}")
+def delete_item(request: Request, index: int):
+    get_bearer(request)
+    items = _load_set()
+    if index < 0 or index >= len(items):
+        from src.api.deps import AppError
+        raise AppError(404, "NOT_FOUND", "评测项不存在")
+    items.pop(index)
+    _save_set(items)
+    return {"count": len(items)}
 
 
 @router.post("/run")

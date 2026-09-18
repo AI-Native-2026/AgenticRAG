@@ -118,8 +118,8 @@ class SyncService:
         try:
             resources = connector.discover()
             self.jobs.start(job_id, total=len(resources))
-            # 抽取表结构（数据库类）
-            if connector.supports("describe"):
+            # 抽取表结构（仅数据库类，供 Text-to-SQL 与 Schema 树）
+            if datasource.get("type") == "database":
                 try:
                     self.extract_schema(datasource, connector)
                 except Exception as e:  # noqa: BLE001

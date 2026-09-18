@@ -1,14 +1,16 @@
-import { useRef, useState } from 'react'
-import { Send } from 'lucide-react'
-import { chatStream } from '@/api/client'
+import { useEffect, useRef, useState } from 'react'
+import { Plus, Send, Trash2 } from 'lucide-react'
+import { api, chatStream } from '@/api/client'
 import { toast } from '@/store/toast'
 
 interface ToolStep { tool: string; ok?: boolean; duration_ms?: number; detail?: string }
-interface Message {
-  role: 'user' | 'bot'
-  content: string
-  steps: ToolStep[]
-  streaming?: boolean
+interface Message { role: 'user' | 'bot'; content: string; steps: ToolStep[]; streaming?: boolean }
+interface SessionMeta { session_id: string; title: string; last: number; messages: number }
+
+const SESSION_KEY = 'kr_session'
+
+function newSessionId() {
+  return `web-${Date.now().toString(36)}`
 }
 
 export default function Chat() {
@@ -17,11 +19,67 @@ export default function Chat() {
   ])
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
-  const sessionId = useRef(`web-${Date.now()}`)
+  const [sessionId, setSessionId] = useState<string>(() => localStorage.getItem(SESSION_KEY) || newSessionId())
+  const [sessions, setSessions] = useState<SessionMeta[]>([])
   const scrollRef = useRef<HTMLDivElement>(null)
 
   function scrollDown() {
     requestAnimationFrame(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight })
+  }
+
+  function persist(id: string) {
+    localStorage.setItem(SESSION_KEY, id)
+    setSessionId(id)
+  }
+
+  async function loadSessions() {
+    try {
+      const r = await api.get<{ sessions: SessionMeta[] }>('/v1/sessions')
+      setSessions(r.sessions)
+    } catch { /* ignore */ }
+  }
+
+  async function loadHistory(id: string) {
+    try {
+      const r = await api.get<{ messages: { role: string; content: string }[] }>(`/v1/sessions/${id}`)
+      if (r.messages.length) {
+        setMessages(r.messages.map((m) => ({ role: m.role === 'user' ? 'user' : 'bot', content: m.content, steps: [] })))
+      } else {
+        setMessages([{ role: 'bot', content: '已开启新会话。', steps: [] }])
+      }
+    } catch {
+      setMessages([{ role: 'bot', content: '已开启新会话。', steps: [] }])
+    }
+  }
+
+  useEffect(() => {
+    loadSessions()
+    loadHistory(sessionId)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  async function switchSession(id: string) {
+    if (busy) return
+    persist(id)
+    await loadHistory(id)
+    scrollDown()
+  }
+
+  function startNew() {
+    const id = newSessionId()
+    persist(id)
+    setMessages([{ role: 'bot', content: '已开启新会话。', steps: [] }])
+    loadSessions()
+  }
+
+  async function removeSession(id: string, e: React.MouseEvent) {
+    e.stopPropagation()
+    try {
+      await api.del(`/v1/sessions/${id}`)
+      toast.ok('会话已删除')
+      if (id === sessionId) startNew()
+      loadSessions()
+    } catch (err: any) { toast.err(err.message) }
   }
 
   async function send() {
@@ -36,7 +94,7 @@ export default function Chat() {
       setMessages((m) => m.map((msg, i) => (i === m.length - 1 ? fn(msg) : msg)))
 
     try {
-      await chatStream(q, sessionId.current, (event, data) => {
+      await chatStream(q, sessionId, (event, data) => {
         if (event === 'token') {
           updateBot((msg) => ({ ...msg, content: msg.content + (data.content || '') }))
           scrollDown()
@@ -45,7 +103,7 @@ export default function Chat() {
         } else if (event === 'rerank') {
           updateBot((msg) => ({ ...msg, steps: [...msg.steps, { tool: 'rerank', detail: `重排 ${data.n_output} 条 · ${data.duration_ms}ms` }] }))
         } else if (event === 'sql') {
-          updateBot((msg) => ({ ...msg, steps: [...msg.steps, { tool: 'sql_query', detail: `${data.row_count} 行`, }] }))
+          updateBot((msg) => ({ ...msg, steps: [...msg.steps, { tool: 'sql_query', detail: `${data.row_count} 行` }] }))
         } else if (event === 'tool_call') {
           updateBot((msg) => {
             const steps = [...msg.steps]
@@ -64,14 +122,15 @@ export default function Chat() {
       updateBot((msg) => ({ ...msg, streaming: false }))
       setBusy(false)
       scrollDown()
+      loadSessions()
     }
   }
 
   return (
     <>
       <div className="page-head">
-        <div><h1>Agent 对话</h1><div className="sub">多轮对话 · 工具调用 · 引用溯源</div></div>
-        <div className="actions"><button className="btn btn-o" onClick={() => { sessionId.current = `web-${Date.now()}`; setMessages([{ role: 'bot', content: '已开启新会话。', steps: [] }]) }}>新建会话</button></div>
+        <div><h1>Agent 对话</h1><div className="sub">多轮对话 · 工具调用 · 引用溯源（会话已持久化）</div></div>
+        <div className="actions"><button className="btn btn-o" onClick={startNew}><Plus size={15} /> 新建会话</button></div>
       </div>
 
       <div className="chat-wrap">
@@ -100,11 +159,26 @@ export default function Chat() {
             <button className="btn btn-p" onClick={send} disabled={busy} data-testid="chat-send"><Send size={15} /> 发送</button>
           </div>
         </div>
+
         <aside style={{ display: 'grid', gap: 16, alignContent: 'start' }}>
+          <div className="card" style={{ maxHeight: 420, overflow: 'auto' }}>
+            <div className="card-head"><h3>会话</h3><span className="muted" style={{ marginLeft: 'auto' }}>{sessions.length}</span></div>
+            <div className="card-pad" style={{ display: 'grid', gap: 4 }}>
+              {sessions.map((s) => (
+                <div key={s.session_id} className={`list-item ${s.session_id === sessionId ? 'active' : ''}`} onClick={() => switchSession(s.session_id)}>
+                  <div className="row" style={{ gap: 6 }}>
+                    <div className="t" style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.title}</div>
+                    <button className="btn btn-g btn-xs" aria-label="删除会话" onClick={(e) => removeSession(s.session_id, e)}><Trash2 size={12} /></button>
+                  </div>
+                  <div className="m"><span>{new Date(s.last * 1000).toLocaleString()}</span><span>{s.messages} 条</span></div>
+                </div>
+              ))}
+              {sessions.length === 0 && <span className="muted">暂无历史会话</span>}
+            </div>
+          </div>
           <div className="card card-pad">
-            <div style={{ fontWeight: 600, marginBottom: 9 }}>检索范围</div>
-            <div className="muted">以登录租户 <b>{''}</b> 为准，自动隔离</div>
-            <div className="note mt">可在「知识库」页配置数据源分组</div>
+            <div style={{ fontWeight: 600, marginBottom: 9 }}>记忆与持久化</div>
+            <div className="note">会话与消息持久化在 MongoDB，刷新/切换会话不丢失；多轮上下文自动恢复。</div>
           </div>
         </aside>
       </div>

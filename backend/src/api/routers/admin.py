@@ -53,12 +53,16 @@ def list_tenants(request: Request):
     user = get_bearer(request)
     require_admin(user)
     svc = request.app.state.svc
-    tenants = svc.quota.list_tenants()
-    for t in tenants:
-        t["_id"] = str(t.get("_id"))
-        usage = Metering().daily_usage(tenant=t.get("_id"), days=1)
-        t["used_tokens_today"] = usage["total_prompt"] + usage["total_completion"]
-        t["stored_nodes"] = svc.docstore.col.count_documents({"tenant": t.get("_id")})
+    qm = svc.quota
+    tenants = []
+    for t in qm.list_tenants():
+        defaults = qm.get_tenant(t["_id"])
+        merged = {**defaults, **t}
+        merged["_id"] = str(merged.get("_id"))
+        usage = Metering().daily_usage(tenant=merged["_id"], days=1)
+        merged["used_tokens_today"] = usage["total_prompt"] + usage["total_completion"]
+        merged["stored_nodes"] = svc.docstore.col.count_documents({"tenant": merged["_id"]})
+        tenants.append(merged)
     return {"tenants": tenants}
 
 
@@ -76,6 +80,71 @@ def create_tenant(request: Request, body: dict):
         quota_storage_nodes=int(body.get("quota_storage_nodes", 10000)),
     )
     return {"created": True, "tenant": tenant}
+
+
+@router.get("/metrics/timeseries")
+def metrics_timeseries(request: Request, days: int = 7, bucket: str = "day"):
+    """按时间桶聚合事件，供时序图表使用。bucket = hour | day。"""
+    user = get_bearer(request)
+    require_admin(user)
+    from datetime import datetime, timedelta
+    import statistics
+
+    events = get_sink().read_all(days=days)
+    fmt = "%Y-%m-%d %H:00" if bucket == "hour" else "%Y-%m-%d"
+    now = datetime.now()
+    if bucket == "hour":
+        buckets = [(now - timedelta(hours=h)).strftime(fmt) for h in range(days * 24 - 1, -1, -1)]
+    else:
+        buckets = [(now - timedelta(days=d)).strftime(fmt) for d in range(days - 1, -1, -1)]
+    index = {b: i for i, b in enumerate(buckets)}
+
+    req = [0] * len(buckets)
+    tool = [0] * len(buckets)
+    tokens = [0] * len(buckets)
+    lat_gen: list[list[float]] = [[] for _ in buckets]
+    lat_ret: list[list[float]] = [[] for _ in buckets]
+
+    for e in events:
+        ts = e.get("ts")
+        if not ts:
+            continue
+        key = datetime.fromtimestamp(ts).strftime(fmt)
+        i = index.get(key)
+        if i is None:
+            continue
+        et = e.get("event_type")
+        if et == "request_start":
+            req[i] += 1
+        elif et == "tool_call":
+            tool[i] += 1
+        elif et == "generate":
+            tokens[i] += int(e.get("total_tokens") or e.get("prompt_tokens") or 0)
+            if e.get("duration_ms"):
+                lat_gen[i].append(e["duration_ms"])
+        elif et == "retrieval" and e.get("duration_ms"):
+            lat_ret[i].append(e["duration_ms"])
+
+    def pct(vals, p):
+        if not vals:
+            return 0
+        if len(vals) == 1:
+            return round(vals[0], 1)
+        q = statistics.quantiles(vals, n=100)
+        return round(q[min(p, 99) - 1], 1)
+
+    return {
+        "bucket": bucket,
+        "buckets": buckets,
+        "series": {
+            "requests": req,
+            "tool_calls": tool,
+            "tokens": tokens,
+            "latency_p50": [pct(v, 50) for v in lat_gen],
+            "latency_p95": [pct(v, 95) for v in lat_gen],
+            "retrieval_p95": [pct(v, 95) for v in lat_ret],
+        },
+    }
 
 
 @router.get("/dashboard/summary")
