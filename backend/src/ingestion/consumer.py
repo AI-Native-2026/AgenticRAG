@@ -67,7 +67,8 @@ class DocumentConsumer:
             index_store = MongoIndexStore()
 
         self.embed_model = embed_model
-        self.docstore = docstore        self.vector_store = vector_store
+        self.docstore = docstore
+        self.vector_store = vector_store
         self.dedup = dedup
         self.chunker = chunker
         self.cache = cache
