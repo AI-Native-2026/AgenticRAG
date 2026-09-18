@@ -35,7 +35,10 @@ class AppServices:
 
     def __init__(self):
         self.env = get_env()
-        self.embed_model = build_embed_model()
+        from src.llm.multimodal import get_embedder
+
+        self.embedder = get_embedder()
+        self.embed_model = getattr(self.embedder, "model", None)
         self.docstore = MongoDocStore()
         self.vector_store = ChromaVectorStore()
         self.index_store = MongoIndexStore()
@@ -49,7 +52,7 @@ class AppServices:
         self.sync_state = SyncStateStore()
         self.lineage = LineageStore()
 
-        self.hybrid = HybridRetriever(embed_model=self.embed_model, vector_store=self.vector_store)
+        self.hybrid = HybridRetriever(vector_store=self.vector_store, embedder=self.embedder)
         self._bm25_lock = threading.Lock()
         self.hybrid.set_node_provider(self.docstore.get_all_nodes)
         self.rebuild_bm25()
@@ -62,7 +65,7 @@ class AppServices:
         self.rag = AgenticRAG(self.tools.build_tools(), self.gateway.build_llm())
 
         self.sync_service = SyncService(
-            embed_model=self.embed_model,
+            embedder=self.embedder,
             docstore=self.docstore,
             vector_store=self.vector_store,
             index_store=self.index_store,

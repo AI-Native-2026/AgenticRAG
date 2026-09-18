@@ -28,10 +28,10 @@ from src.config import get_env
 class ChromaVectorStore:
     """ChromaDB 向量仓库封装。"""
 
-    def __init__(self, collection_name: str = "agentic_rag_nodes", path: Optional[str] = None):
+    def __init__(self, collection_name: Optional[str] = None, path: Optional[str] = None):
         env = get_env()
         self.path = path or env["CHROMA_PATH"]
-        self.collection_name = collection_name
+        self.collection_name = collection_name or env.get("CHROMA_COLLECTION", "agentic_rag_nodes")
 
         self.client = chromadb.PersistentClient(path=self.path)
         # hnsw:space = cosine 让 Chroma 用余弦相似度做检索（与 bge 归一化向量一致）
@@ -67,6 +67,8 @@ class ChromaVectorStore:
                         "doc_type": n.get("doc_type", ""),
                         "source_type": n.get("source_type", "file"),
                         "datasource_id": n.get("datasource_id") or "",
+                        "modality": (n.get("metadata") or {}).get("modality", "text"),
+                        "media_path": (n.get("metadata") or {}).get("media_path", "") or "",
                         "doc_version": n.get("doc_version", 1),
                         "chunk_idx": n.get("chunk_idx", 0),
                     }

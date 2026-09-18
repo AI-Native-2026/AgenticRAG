@@ -83,6 +83,8 @@ export interface RetrievalResult {
   doc_name: string
   source_type: string
   datasource_id: string
+  modality?: string
+  media_path?: string
   table?: string
   page?: number | string
   vector_score?: number

@@ -50,15 +50,24 @@ class HybridRetriever:
 
     def __init__(
         self,
-        embed_model: BaseEmbedding,
-        vector_store: ChromaVectorStore,
+        embed_model=None,
+        vector_store: ChromaVectorStore = None,
         bm25_retriever: Optional[BM25Retriever] = None,
+        embedder=None,
     ):
         self.embed_model = embed_model
         self.vector_store = vector_store
         self.bm25 = bm25_retriever or BM25Retriever()
+        self._embedder = embedder
         self._dirty = False
         self._node_provider = None
+
+    @property
+    def embedder(self):
+        if self._embedder is None:
+            from src.llm.multimodal import get_embedder
+            self._embedder = get_embedder()
+        return self._embedder
 
     # ---------- 增量/惰性 BM25 维护 ----------
 
@@ -99,7 +108,7 @@ class HybridRetriever:
         from concurrent.futures import ThreadPoolExecutor
 
         def _vector_recall():
-            q_emb = ModelExecutor.embed(self.embed_model, [query])[0]
+            q_emb = self.embedder.embed_items([{"text": query}])[0]
             return self.vector_store.query(q_emb, top_k=top_k_v, where=where)
 
         with ThreadPoolExecutor(max_workers=2) as ex:

@@ -93,6 +93,8 @@ def get_env() -> Dict[str, Any]:
     # ---- 检索 / 索引 ----
     config["EMBED_DIM"] = int(_get("EMBED_DIM", "512"))
     config["EMBED_MODEL_NAME"] = _get("EMBED_MODEL_NAME", "bge-small-zh-v1.5")
+    config["EMBED_BACKEND"] = _get("EMBED_BACKEND", "text")   # text | vl（多模态）
+    config["CHROMA_COLLECTION"] = _get("CHROMA_COLLECTION", "agentic_rag_nodes")
     config["CHUNK_SIZE"] = int(_get("CHUNK_SIZE", "256"))
     config["CHUNK_OVERLAP"] = int(_get("CHUNK_OVERLAP", "20"))
     config["TOP_K_RECALL"] = int(_get("TOP_K_RECALL", "30"))

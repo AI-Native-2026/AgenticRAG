@@ -180,6 +180,17 @@ class RAGTools:
                                      duration_ms=round(dur_rerank, 1), n_input=len(candidates)))
         emit_step("retrieval", n_candidates=len(candidates), duration_ms=round(dur_recall, 1))
         emit_step("rerank", n_output=len(ranked), duration_ms=round(dur_rerank, 1))
+        # 引用来源（供对话展示，图片类型可显示缩略图）
+        emit_step("sources", items=[
+            {
+                "node_id": r["node_id"],
+                "doc_name": (r.get("metadata") or {}).get("doc_name", ""),
+                "modality": (r.get("metadata") or {}).get("modality", "text"),
+                "page": (r.get("metadata") or {}).get("page"),
+                "score": round(float(r.get("rerank_score", r.get("rrf_score", 0)) or 0), 3),
+            }
+            for r in ranked
+        ])
 
         return json.dumps(
             [

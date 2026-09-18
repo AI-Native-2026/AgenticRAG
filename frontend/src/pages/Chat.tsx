@@ -4,9 +4,11 @@ import { api, chatStream } from '@/api/client'
 import { toast } from '@/store/toast'
 import MarkdownView from '@/components/MarkdownView'
 import KnowledgeScope from '@/components/KnowledgeScope'
+import AuthImage from '@/components/AuthImage'
 
 interface ToolStep { tool: string; ok?: boolean; duration_ms?: number; detail?: string }
-interface Message { role: 'user' | 'bot'; content: string; steps: ToolStep[]; streaming?: boolean }
+interface Source { node_id: string; doc_name: string; modality?: string; page?: number | string; score?: number }
+interface Message { role: 'user' | 'bot'; content: string; steps: ToolStep[]; sources?: Source[]; streaming?: boolean }
 interface SessionMeta { session_id: string; title: string; last: number; messages: number }
 
 const SESSION_KEY = 'kr_session'
@@ -110,6 +112,8 @@ export default function Chat() {
           updateBot((msg) => ({ ...msg, steps: [...msg.steps, { tool: 'rerank', detail: `重排 ${data.n_output} 条 · ${data.duration_ms}ms` }] }))
         } else if (event === 'sql') {
           updateBot((msg) => ({ ...msg, steps: [...msg.steps, { tool: 'sql_query', detail: `${data.row_count} 行` }] }))
+        } else if (event === 'sources') {
+          updateBot((msg) => ({ ...msg, sources: data.items || [] }))
         } else if (event === 'tool_call') {
           updateBot((msg) => {
             const steps = [...msg.steps]
@@ -153,6 +157,19 @@ export default function Chat() {
                         ? <MarkdownView content={m.content} />
                         : (m.streaming ? <span className="typing"><span /><span /><span /></span> : '')}
                   </div>
+                  {m.role === 'bot' && m.sources && m.sources.length > 0 && (
+                    <div className="cites">
+                      {m.sources.map((s) => (
+                        <div className="cite" key={s.node_id}>
+                          {s.modality === 'image' && (
+                            <AuthImage nodeId={s.node_id} alt={s.doc_name}
+                              style={{ width: 64, height: 46, objectFit: 'cover', borderRadius: 6 }} />
+                          )}
+                          <span>{s.doc_name}{s.page ? ` · p${s.page}` : ''}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             ))}

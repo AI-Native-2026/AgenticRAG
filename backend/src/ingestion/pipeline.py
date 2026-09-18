@@ -39,11 +39,12 @@ class IngestionPipeline:
 
     def __init__(
         self,
-        embed_model: BaseEmbedding,
-        docstore: MongoDocStore,
-        vector_store: ChromaVectorStore,
-        index_store: MongoIndexStore,
+        embed_model=None,
+        docstore: MongoDocStore = None,
+        vector_store: ChromaVectorStore = None,
+        index_store: MongoIndexStore = None,
         cache: Optional[CacheClient] = None,
+        embedder=None,
     ):
         self.embed_model = embed_model
         self.docstore = docstore
@@ -54,6 +55,14 @@ class IngestionPipeline:
         self.loader = DocumentLoader()
         self.chunker = Chunker()
         self.env = get_env()
+        self._embedder = embedder
+
+    @property
+    def embedder(self):
+        if self._embedder is None:
+            from src.llm.multimodal import get_embedder
+            self._embedder = get_embedder()
+        return self._embedder
 
     def run(self) -> Dict[str, int]:
         """执行一次全量/增量同步，返回统计信息。"""
@@ -105,11 +114,10 @@ class IngestionPipeline:
         return stats
 
     def _embed_texts(self, texts: List[str], batch_size: int = 32) -> List[List[float]]:
-        """批量 embedding，命中缓存则跳过，未命中才调 GPU 模型。"""
-        results: List[List[float]] = []
+        """批量 embedding（统一走 Embedder，带缓存）。"""
+        results: List[Optional[List[float]]] = []
         pending_texts: List[str] = []
         pending_idx: List[int] = []
-
         for i, text in enumerate(texts):
             cached = self.cache.get_embedding(text) if self.cache else None
             if cached is not None:
@@ -118,11 +126,10 @@ class IngestionPipeline:
                 results.append(None)
                 pending_texts.append(text)
                 pending_idx.append(i)
-
         if pending_texts:
             for start in range(0, len(pending_texts), batch_size):
-                batch = pending_texts[start : start + batch_size]
-                vecs = self.embed_model.get_text_embedding_batch(batch)
+                batch = pending_texts[start:start + batch_size]
+                vecs = self.embedder.embed_items([{"text": t} for t in batch])
                 for local_i, vec in enumerate(vecs):
                     gi = pending_idx[start + local_i]
                     results[gi] = vec

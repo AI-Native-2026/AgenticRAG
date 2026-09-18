@@ -44,15 +44,16 @@ class SyncService:
 
     def __init__(
         self,
-        embed_model,
-        docstore: MongoDocStore,
-        vector_store: ChromaVectorStore,
-        index_store: MongoIndexStore,
+        embed_model=None,
+        docstore: MongoDocStore = None,
+        vector_store: ChromaVectorStore = None,
+        index_store: MongoIndexStore = None,
         cache=None,
         job_store: Optional[JobStore] = None,
         sync_state: Optional[SyncStateStore] = None,
         schema_store: Optional[SchemaStore] = None,
         lineage=None,
+        embedder=None,
     ):
         self.embed_model = embed_model
         self.docstore = docstore
@@ -65,6 +66,14 @@ class SyncService:
         self.lineage = lineage
         self.dedup = DocDedup()
         self.chunker = Chunker()
+        self._embedder = embedder
+
+    @property
+    def embedder(self):
+        if self._embedder is None:
+            from src.llm.multimodal import get_embedder
+            self._embedder = get_embedder()
+        return self._embedder
 
     # ---------- 连接器 ----------
 
@@ -204,7 +213,7 @@ class SyncService:
                 self.cache.invalidate(ref_doc_id)
 
         self.docstore.put_nodes(nodes)
-        embeddings = self._embed_texts([n["text"] for n in nodes])
+        embeddings = self._embed_nodes(nodes)
         self.vector_store.add_nodes(nodes, embeddings)
         self.dedup.save_record(ref_doc_id, text_hash, version, len(nodes))
 
@@ -219,27 +228,38 @@ class SyncService:
 
     # ---------- embedding ----------
 
-    def _embed_texts(self, texts: List[str], batch_size: int = 32) -> List[List[float]]:
-        results: List[Optional[List[float]]] = []
-        pending_texts: List[str] = []
+    def _cache_key(self, node: Dict[str, Any]) -> str:
+        meta = node.get("metadata") or {}
+        if meta.get("modality") == "image" and meta.get("media_path"):
+            from src.llm.multimodal import image_cache_key
+            return image_cache_key(meta["media_path"])
+        return node.get("text") or ""
+
+    def _embed_nodes(self, nodes: List[Dict[str, Any]]) -> List[List[float]]:
+        """按节点类型 embedding：图片走多模态向量，文本走文本向量。命中缓存则跳过。"""
+        results: List[Optional[List[float]]] = [None] * len(nodes)
+        pending: List[Dict[str, Any]] = []
         pending_idx: List[int] = []
-        for i, text in enumerate(texts):
-            cached = self.cache.get_embedding(text) if self.cache else None
+        for i, n in enumerate(nodes):
+            key = self._cache_key(n)
+            cached = self.cache.get_embedding(key) if self.cache else None
             if cached is not None:
-                results.append(cached)
+                results[i] = cached
             else:
-                results.append(None)
-                pending_texts.append(text)
+                pending.append(n)
                 pending_idx.append(i)
-        if pending_texts:
-            for start in range(0, len(pending_texts), batch_size):
-                batch = pending_texts[start:start + batch_size]
-                vecs = self.embed_model.get_text_embedding_batch(batch)
-                for local_i, vec in enumerate(vecs):
-                    gi = pending_idx[start + local_i]
-                    results[gi] = vec
-                    if self.cache:
-                        self.cache.set_embedding(pending_texts[start + local_i], vec)
+        if pending:
+            items = [{
+                "text": n.get("text", ""),
+                "modality": (n.get("metadata") or {}).get("modality"),
+                "media_path": (n.get("metadata") or {}).get("media_path"),
+            } for n in pending]
+            vecs = self.embedder.embed_items(items)
+            for j, vec in enumerate(vecs):
+                gi = pending_idx[j]
+                results[gi] = vec
+                if self.cache:
+                    self.cache.set_embedding(self._cache_key(pending[j]), vec)
         return results
 
     # ---------- 辅助 ----------
@@ -258,14 +278,13 @@ class SyncService:
             return 0
 
     def _write_index_meta(self) -> None:
-        from src.config import get_env
-        env = get_env()
+        emb = self.embedder
         self.index_store.put_index({
             "index_name": "vector_main",
             "index_type": "vector",
             "node_ids": [],
-            "embedding_model": env.get("EMBED_MODEL_NAME", "bge"),
-            "embed_dim": int(env["EMBED_DIM"]),
+            "embedding_model": emb.name,
+            "embed_dim": int(emb.dim or 0),
             "extra": {"vector_count": self.vector_store.count(), "run_at": time.time()},
         })
 

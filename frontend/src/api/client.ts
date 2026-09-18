@@ -68,6 +68,24 @@ export const api = {
   del: <T>(p: string) => request<T>(p, { method: 'DELETE' }),
 }
 
+/** 以图搜图：上传图片 → 视觉相似检索。 */
+export async function searchByImage(file: File, topN = 5): Promise<any> {
+  const form = new FormData()
+  form.append('file', file)
+  const res = await fetch(`/v1/retrieval/search-by-image?top_n=${topN}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${getToken()}` },
+    body: form,
+  })
+  if (!res.ok) return parseError(res)
+  return res.json()
+}
+
+/** 媒体文件（图片缩略图）URL。 */
+export function mediaUrl(nodeId: string): string {
+  return `/v1/media/${nodeId}`
+}
+
 /** 流式对话：逐步骤回调。 */
 export async function chatStream(
   question: string,
