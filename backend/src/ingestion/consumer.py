@@ -43,8 +43,10 @@ class DocumentConsumer:
 
         # 延迟导入，避免模块初始化时就拉起 GPU/模型
         if embed_model is None:
-            from src.llm.gateway import build_embed_model
-            embed_model = build_embed_model()
+            from src.llm.multimodal import get_embedder
+            self.embedder = get_embedder()
+        else:
+            self.embedder = None
         if docstore is None:
             from src.storage.docstore import MongoDocStore
             docstore = MongoDocStore()
@@ -65,8 +67,7 @@ class DocumentConsumer:
             index_store = MongoIndexStore()
 
         self.embed_model = embed_model
-        self.docstore = docstore
-        self.vector_store = vector_store
+        self.docstore = docstore        self.vector_store = vector_store
         self.dedup = dedup
         self.chunker = chunker
         self.cache = cache
@@ -164,7 +165,7 @@ class DocumentConsumer:
 
         # 3) 写真相源 → 批量 embedding → 写向量库
         self.docstore.put_nodes(nodes)
-        embeddings = self._embed([n["text"] for n in nodes])
+        embeddings = self._embed_nodes(nodes)
         self.vector_store.add_nodes(nodes, embeddings)
         self.dedup.save_record(ref_doc_id, self._text_hash(text), version, len(nodes))
 
@@ -185,28 +186,41 @@ class DocumentConsumer:
 
         return hashlib.md5(text.encode("utf-8")).hexdigest()
 
-    def _embed(self, texts: List[str], batch_size: int = 32) -> List[List[float]]:
-        """批量 embedding + 缓存。GPU 推理在 gateway 的锁下执行（单写者）。"""
-        results = []
+    def _embed_nodes(self, nodes: List[Dict]) -> List[List[float]]:
+        """按节点类型 embedding（图片走多模态）+ 缓存。"""
+        if self.embedder is None:
+            from src.llm.multimodal import get_embedder
+            self.embedder = get_embedder()
+        results: List = [None] * len(nodes)
         pending, idx = [], []
-        for i, t in enumerate(texts):
-            cached = self.cache.get_embedding(t)
+        for i, n in enumerate(nodes):
+            key = self._cache_key(n)
+            cached = self.cache.get_embedding(key) if self.cache else None
             if cached is not None:
-                results.append(cached)
+                results[i] = cached
             else:
-                results.append(None)
-                pending.append(t)
+                pending.append(n)
                 idx.append(i)
-        for start in range(0, len(pending), batch_size):
-            batch = pending[start:start + batch_size]
-            from src.llm.gateway import ModelExecutor
-
-            vecs = ModelExecutor.embed(self.embed_model, batch)  # GPU 单写者锁
+        if pending:
+            items = [{
+                "text": n.get("text", ""),
+                "modality": (n.get("metadata") or {}).get("modality"),
+                "media_path": (n.get("metadata") or {}).get("media_path"),
+            } for n in pending]
+            vecs = self.embedder.embed_items(items)
             for j, v in enumerate(vecs):
-                gi = idx[start + j]
+                gi = idx[j]
                 results[gi] = v
-                self.cache.set_embedding(pending[start + j], v)
+                if self.cache:
+                    self.cache.set_embedding(self._cache_key(pending[j]), v)
         return results
+
+    def _cache_key(self, node: Dict) -> str:
+        meta = node.get("metadata") or {}
+        if meta.get("modality") == "image" and meta.get("media_path"):
+            from src.llm.multimodal import image_cache_key
+            return image_cache_key(meta["media_path"])
+        return node.get("text") or ""
 
 
 if __name__ == "__main__":
