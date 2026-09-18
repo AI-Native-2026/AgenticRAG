@@ -107,9 +107,16 @@ def generate_sql(question: str, schema_text: str, dialect: str = "sql",
     gateway = LLMGateway()
     raw = gateway.complete(prompt)
     sql = raw.strip()
+    # 去掉模型可能返回的角色/标签前缀（assistant: / SQL: 等）
+    sql = re.sub(r"^\s*(assistant|ai|sql|sqlquery)\s*[:：]\s*", "", sql, flags=re.IGNORECASE)
+    # 去掉 markdown 代码块
     if sql.startswith("```"):
         sql = re.sub(r"^```[a-zA-Z]*\n?", "", sql)
         sql = re.sub(r"\n?```$", "", sql).strip()
+    # 若前面还有多余说明，从第一个 SELECT / WITH 开始截取
+    m = re.search(r"\b(select|with)\b", sql, re.IGNORECASE)
+    if m and m.start() > 0:
+        sql = sql[m.start():]
     return validate_sql(sql, allowed_tables)
 
 

@@ -175,8 +175,17 @@ class LLMGateway:
 
     def complete(self, prompt: str, tenant: str = "default", **kwargs) -> str:
         """带重试的纯文本补全。"""
-        return str(self.chat([ChatMessage(role=MessageRole.USER, content=prompt)],
-                             tenant=tenant, **kwargs))
+        resp = self.chat([ChatMessage(role=MessageRole.USER, content=prompt)],
+                         tenant=tenant, **kwargs)
+        # 优先取 message.content；部分 OpenAI 兼容实现 str(resp) 会带 "assistant:" 前缀
+        try:
+            content = getattr(getattr(resp, "message", None), "content", None)
+            if content:
+                return str(content)
+        except Exception:  # noqa: BLE001
+            pass
+        import re as _re
+        return _re.sub(r"^\s*(assistant|ai|sql)\s*[:：]\s*", "", str(resp), flags=_re.IGNORECASE)
 
     # ---------- KV 前缀缓存统计（honest 版） ----------
 
