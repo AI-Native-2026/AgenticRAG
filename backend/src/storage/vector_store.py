@@ -36,7 +36,7 @@ class ChromaVectorStore:
         self.client = chromadb.PersistentClient(path=self.path)
         # hnsw:space = cosine 让 Chroma 用余弦相似度做检索（与 bge 归一化向量一致）
         self.collection = self.client.get_or_create_collection(
-            name=collection_name,
+            name=self.collection_name,
             metadata={"hnsw:space": "cosine"},
         )
 

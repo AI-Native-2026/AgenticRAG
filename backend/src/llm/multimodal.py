@@ -63,12 +63,16 @@ class VLEmbedder(BaseEmbedder):
 
     def __init__(self, path: str, device: str = "cpu"):
         from sentence_transformers import SentenceTransformer
+        import torch
 
         logger.info("加载多模态 Embedding 模型 %s ...", path)
+        # 8B 模型必须用 bf16，否则 fp32 会超出 24G 显存
+        model_kwargs = {"torch_dtype": torch.bfloat16, "low_cpu_mem_usage": True}
         try:
-            self.model = SentenceTransformer(path, device=device, trust_remote_code=True)
+            self.model = SentenceTransformer(path, device=device, trust_remote_code=True,
+                                             model_kwargs=model_kwargs)
         except TypeError:
-            self.model = SentenceTransformer(path, device=device)
+            self.model = SentenceTransformer(path, device=device, model_kwargs=model_kwargs)
         try:
             self.dim = int(self.model.get_sentence_embedding_dimension())
         except Exception:  # noqa: BLE001
