@@ -59,19 +59,7 @@
 
 ## 架构
 
-```
-Web 界面 ──REST/SSE──> FastAPI ──> Agent(工具 / 记忆 / 审计)
-                                        │
-             混合检索(向量 + BM25 + RRF) ──> 重排(CE / VL) ──> 范围过滤
-                                        │
-        Redis 缓存 + LLM 网关(重试 / 限流 / 熔断 / GPU 锁 / 计量)
-                                        │
-   Mongo(真相源 / 索引 / 会话 / 审计 / 血缘 / 计量 / 租户) + Chroma(向量)
-                                        ▲
-   入库流水线(连接器 → 统一模型 → 切分 → 去重 → 批量 Embedding → 版本化)
-                                        ▲
-   数据接入(文件 / 数据库 / Web) + 富文档 / 多媒体(表格 / OCR / 图片)
-```
+![整体架构](imgs/arch.png)
 
 详见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
 
