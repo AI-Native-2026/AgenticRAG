@@ -59,6 +59,62 @@ def mask_rows(rows: List[Dict[str, Any]], extra_patterns: List[str] | None = Non
     return [mask_any(r, extra_patterns) for r in rows]
 
 
+# ---------- 列名感知脱敏（数据库行） ----------
+
+DEFAULT_SENSITIVE_COLUMNS = [
+    "name", "phone", "mobile", "tel", "email", "mail", "id_card", "idcard",
+    "id_no", "ssn", "passport", "bank", "card", "account", "address", "addr",
+]
+
+
+def is_sensitive_column(column: str, patterns: List[str] | None = None) -> bool:
+    col = str(column).lower()
+    for p in (patterns or DEFAULT_SENSITIVE_COLUMNS):
+        if p and p in col:
+            return True
+    return False
+
+
+def _mask_column_value(column: str, value: Any) -> Any:
+    if value is None or value == "":
+        return value
+    s = str(value)
+    col = str(column).lower()
+    if any(k in col for k in ("phone", "mobile", "tel")):
+        return mask_text(s)
+    if any(k in col for k in ("email", "mail")):
+        return mask_text(s)
+    if any(k in col for k in ("id_card", "idcard", "id_no", "ssn", "passport")):
+        return mask_text(s)
+    if any(k in col for k in ("bank", "card", "account")):
+        return mask_text(s)
+    if any(k in col for k in ("address", "addr")):
+        return (s[:6] + "***") if len(s) > 6 else "***"
+    if "name" in col:
+        return (s[0] + "*" * (len(s) - 1)) if len(s) > 1 else "*"
+    return mask_text(s)
+
+
+def mask_row(row: Dict[str, Any], patterns: List[str] | None = None) -> Dict[str, Any]:
+    """按列名对一行数据脱敏；非敏感列仍做通用文本脱敏兜底。"""
+    out: Dict[str, Any] = {}
+    for k, v in row.items():
+        if is_sensitive_column(k, patterns):
+            out[k] = _mask_column_value(k, v)
+        else:
+            out[k] = mask_text(str(v)) if isinstance(v, str) else v
+    return out
+
+
+def mask_table_rows(rows: List[Dict[str, Any]],
+                    patterns: List[str] | None = None) -> List[Dict[str, Any]]:
+    return [mask_row(r, patterns) for r in rows]
+
+
+def row_to_text(row: Dict[str, Any]) -> str:
+    return "\n".join(f"{k}: {v}" for k, v in row.items() if str(v).strip() != "")
+
+
 if __name__ == "__main__":
     demo = "张三 13812345678 zhang.san@example.com 110101199003071234 6222021234567890123 192.168.1.100"
     print(mask_text(demo))

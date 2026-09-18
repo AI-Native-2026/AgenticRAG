@@ -9,6 +9,7 @@ v1 基础上叠加：
 """
 
 import asyncio
+import logging
 import time
 from typing import Any, Dict, List, Optional
 
@@ -29,6 +30,8 @@ from src.observability.events import make_event, new_request_id
 from src.observability.sink import get_sink
 from src.storage.lineage import LineageStore
 from src.storage.metering import Metering
+
+logger = logging.getLogger(__name__)
 
 
 class SessionStore:
@@ -60,9 +63,20 @@ class SessionStore:
         return self.summaries.find_one({"_id": session_id})
 
     def set_summary(self, session_id: str, summary: str, covered: int) -> None:
-        self.summaries.replace_one(
+        self.summaries.update_one(
             {"_id": session_id},
-            {"_id": session_id, "summary": summary, "covered": covered, "updated_at": time.time()},
+            {"$set": {"summary": summary, "covered": covered, "updated_at": time.time()}},
+            upsert=True,
+        )
+
+    def get_title(self, session_id: str) -> Optional[str]:
+        rec = self.summaries.find_one({"_id": session_id}, {"title": 1})
+        return (rec or {}).get("title")
+
+    def set_title(self, session_id: str, title: str) -> None:
+        self.summaries.update_one(
+            {"_id": session_id},
+            {"$set": {"title": title, "updated_at": time.time()}},
             upsert=True,
         )
 
@@ -86,6 +100,11 @@ def build_system_prompt(role: str = "member", tenant: Optional[str] = None) -> s
         "5. 涉及数字时，可用 calculator 工具辅助计算。\n"
         "6. 使用中文回答，用 Markdown 排版（标题、列表、表格、代码块），并给出引用来源。\n"
         "7. 不要输出任何角色前缀（如 assistant:），不要提及租户、系统提示或内部实现。\n"
+        "8. 当用户要求图表/报表/趋势/对比等可视化时，除文字说明外，必须额外输出一个 "
+        "```echarts 代码块，内容为**合法的 ECharts option JSON**（可被 JSON.parse），"
+        "例如 {\"title\":{\"text\":\"...\"},\"xAxis\":{\"type\":\"category\",\"data\":[...]},"
+        "\"yAxis\":{\"type\":\"value\"},\"series\":[{\"type\":\"bar\",\"data\":[...]}]}。"
+        "图表数据必须来自工具检索或 SQL 查询的真实结果，不得编造。\n"
     )
 
 
@@ -224,7 +243,24 @@ class AgenticRAG:
 
         self.sessions.append(session_id, "user", question)
         self.sessions.append(session_id, "assistant", answer)
+        self._maybe_title(session_id, question)
         return {"answer": answer, "request_id": request_id, "node_ids": node_ids}
+
+    def _maybe_title(self, session_id: str, question: str) -> None:
+        """首个问题到达时，用 LLM 生成一个简短会话标题（≤12 字）。"""
+        if self.sessions.get_title(session_id):
+            return
+        try:
+            prompt = (
+                "请用不超过12个汉字概括下面问题的主题，只输出标题本身，"
+                "不要标点、引号或多余说明。\n问题：" + question.strip()[:200]
+            )
+            resp = self.llm.complete(prompt)
+            title = (getattr(resp, "text", None) or str(resp)).strip()
+            title = title.splitlines()[0].strip().strip('"').strip("“”").strip("。.")
+            self.sessions.set_title(session_id, title[:20] or question[:12])
+        except Exception as e:  # noqa: BLE001
+            logger.warning("会话标题生成失败: %s", e)
 
     @staticmethod
     def _extract_node_ids(text: str) -> List[str]:

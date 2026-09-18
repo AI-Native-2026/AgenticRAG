@@ -102,7 +102,7 @@ def get_env() -> Dict[str, Any]:
     config["DEVICE"] = "cuda" if (os.path.exists("/usr/local/cuda") or os.path.exists("/dev/nvidia0")) else "cpu"
 
     # ---- 会话上下文管理 ----
-    config["MEMORY_TOKEN_LIMIT"] = int(_get("MEMORY_TOKEN_LIMIT", "3000"))       # 短期记忆 token 预算
+    config["MEMORY_TOKEN_LIMIT"] = int(_get("MEMORY_TOKEN_LIMIT", "10000"))      # 短期记忆 token 预算
     config["MEMORY_RECENT_TURNS"] = int(_get("MEMORY_RECENT_TURNS", "6"))        # 保留最近 N 轮原文
     config["MEMORY_SUMMARY_ENABLED"] = _get("MEMORY_SUMMARY_ENABLED", "true").lower() == "true"
 
@@ -114,6 +114,10 @@ def get_env() -> Dict[str, Any]:
     # ---- 隐私合规（预览脱敏） ----
     config["PII_MASK_ENABLED"] = _get("PII_MASK_ENABLED", "true").lower() == "true"
     config["PII_MASK_EXTRA"] = [p for p in _get("PII_MASK_EXTRA", "").split("||") if p.strip()]
+    config["PII_MASK_COLUMNS"] = [c.strip().lower() for c in _get(
+        "PII_MASK_COLUMNS",
+        "name,phone,mobile,tel,email,mail,id_card,idcard,id_no,ssn,passport,bank,card,account,address,addr"
+    ).split(",") if c.strip()]
 
     # ---- 多媒体 / 富文档 ----
     config["IMAGE_OCR_ENABLED"] = _get("IMAGE_OCR_ENABLED", "true").lower() == "true"

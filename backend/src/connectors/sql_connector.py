@@ -189,6 +189,40 @@ class SQLConnector(BaseConnector):
         result["sql"] = sql
         return result
 
+    # ---------- 预览（列名感知脱敏） ----------
+
+    def preview(self, resource: Optional[str] = None, limit: int = 10,
+                max_chars: int = 2000) -> List[RawDocument]:
+        from sqlalchemy import text as _text
+
+        from src.config import get_env
+        from src.connectors.masking import mask_table_rows, row_to_text
+
+        env = get_env()
+        mask_on = bool(env.get("PII_MASK_ENABLED", True))
+        pats = env.get("PII_MASK_COLUMNS")
+        tables = [resource] if resource else [m.name for m in self.discover()]
+        out: List[RawDocument] = []
+        for table in tables:
+            try:
+                with self.engine.connect() as conn:
+                    res = conn.execute(_text(
+                        f"SELECT * FROM {self._quote(table)} LIMIT {int(limit)}"))
+                    rows = [dict(r._mapping) for r in res]
+            except Exception as e:  # noqa: BLE001
+                raise ConnectorError(f"预览失败 {table}: {e}") from e
+            if mask_on:
+                rows = mask_table_rows(rows, pats)
+            for i, row in enumerate(rows):
+                out.append(RawDocument(
+                    ref=f"{table}#{i}", text=row_to_text(row)[:max_chars], title=table,
+                    metadata={"source_type": "database", "datasource_id": self.ds_id,
+                              "table": table, "modality": "table", "masked": mask_on},
+                ))
+                if len(out) >= limit:
+                    return out
+        return out
+
     @staticmethod
     def _quote(name: str) -> str:
         if not name.replace("_", "").replace(".", "").isalnum():

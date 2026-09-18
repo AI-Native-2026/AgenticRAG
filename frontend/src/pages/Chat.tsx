@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { Plus, Send, Trash2 } from 'lucide-react'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
 import { api, chatStream } from '@/api/client'
 import { toast } from '@/store/toast'
+import MarkdownView from '@/components/MarkdownView'
 
 interface ToolStep { tool: string; ok?: boolean; duration_ms?: number; detail?: string }
 interface Message { role: 'user' | 'bot'; content: string; steps: ToolStep[]; streaming?: boolean }
@@ -17,13 +16,12 @@ function newSessionId() {
 
 export default function Chat() {
   const [messages, setMessages] = useState<Message[]>([
-    { role: 'bot', content: '你好，我是 **小K**，你的知识中台助手。可以帮你检索知识库，或查询已接入的数据库。', steps: [] },
+    { role: 'bot', content: '你好，我是 **小K**，你的知识中台助手。可以帮你检索知识库、查询数据库，或生成数据图表。', steps: [] },
   ])
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
   const [sessionId, setSessionId] = useState<string>(() => localStorage.getItem(SESSION_KEY) || newSessionId())
   const [sessions, setSessions] = useState<SessionMeta[]>([])
-  const [memory, setMemory] = useState<any>(null)
   const [kbs, setKbs] = useState<any[]>([])
   const [selectedKbs, setSelectedKbs] = useState<string[]>([])
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -65,10 +63,6 @@ export default function Chat() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  useEffect(() => {
-    api.get<any>(`/v1/sessions/${sessionId}/memory`).then(setMemory).catch(() => setMemory(null))
-  }, [sessionId, messages.length])
-
   async function switchSession(id: string) {
     if (busy) return
     persist(id)
@@ -91,6 +85,10 @@ export default function Chat() {
       if (id === sessionId) startNew()
       loadSessions()
     } catch (err: any) { toast.err(err.message) }
+  }
+
+  function toggleKb(id: string) {
+    setSelectedKbs((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id])
   }
 
   async function send() {
@@ -140,7 +138,7 @@ export default function Chat() {
   return (
     <>
       <div className="page-head">
-        <div><h1>Agent 对话</h1><div className="sub">多轮对话 · 工具调用 · 引用溯源（会话已持久化）</div></div>
+        <div><h1>Agent 对话</h1><div className="sub">多轮对话 · 工具调用 · 图表报表 · 引用溯源</div></div>
         <div className="actions"><button className="btn btn-o" onClick={startNew}><Plus size={15} /> 新建会话</button></div>
       </div>
 
@@ -155,7 +153,7 @@ export default function Chat() {
                     {m.role === 'user'
                       ? m.content
                       : m.content
-                        ? <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown>
+                        ? <MarkdownView content={m.content} />
                         : (m.streaming ? <span className="typing"><span /><span /><span /></span> : '')}
                   </div>
                   {m.steps.map((s, j) => (
@@ -167,6 +165,17 @@ export default function Chat() {
               </div>
             ))}
           </div>
+
+          <div className="kb-scope">
+            <span className="lbl">检索范围</span>
+            <button className={`chip ${selectedKbs.length === 0 ? 'active' : ''}`} onClick={() => setSelectedKbs([])}>全部知识库</button>
+            {kbs.map((k) => (
+              <button key={k.kb_id} className={`chip ${selectedKbs.includes(k.kb_id) ? 'active' : ''}`}
+                onClick={() => toggleKb(k.kb_id)}>{k.name}</button>
+            ))}
+            {kbs.length === 0 && <span className="muted">暂无知识库</span>}
+          </div>
+
           <div className="chat-input">
             <textarea className="input" value={input} placeholder="输入问题，Enter 发送 / Shift+Enter 换行"
               onChange={(e) => setInput(e.target.value)}
@@ -176,7 +185,7 @@ export default function Chat() {
         </div>
 
         <aside style={{ display: 'grid', gap: 16, alignContent: 'start' }}>
-          <div className="card" style={{ maxHeight: 420, overflow: 'auto' }}>
+          <div className="card" style={{ maxHeight: 'calc(100vh - 200px)', overflow: 'auto' }}>
             <div className="card-head"><h3>会话</h3><span className="muted" style={{ marginLeft: 'auto' }}>{sessions.length}</span></div>
             <div className="card-pad" style={{ display: 'grid', gap: 4 }}>
               {sessions.map((s) => (
@@ -190,46 +199,6 @@ export default function Chat() {
               ))}
               {sessions.length === 0 && <span className="muted">暂无历史会话</span>}
             </div>
-          </div>
-          <div className="card card-pad">
-            <div className="row" style={{ marginBottom: 9 }}>
-              <div style={{ fontWeight: 600 }}>检索范围（知识库）</div>
-              <span className="spacer" />
-              <button className="btn btn-g btn-xs" onClick={() => setSelectedKbs([])}>全部</button>
-            </div>
-            {kbs.length === 0 ? <span className="muted">暂无知识库</span> : (
-              <div style={{ display: 'grid', gap: 8 }}>
-                {kbs.map((k) => (
-                  <label key={k.kb_id} className="row" style={{ gap: 8 }}>
-                    <input type="checkbox" checked={selectedKbs.includes(k.kb_id)}
-                      onChange={(e) => setSelectedKbs(e.target.checked
-                        ? [...selectedKbs, k.kb_id]
-                        : selectedKbs.filter((x) => x !== k.kb_id))} />
-                    <span>{k.name}</span>
-                    <span className="spacer" />
-                    <span className="muted">{k.datasource_count ?? k.datasource_ids?.length ?? 0} 源</span>
-                  </label>
-                ))}
-              </div>
-            )}
-            <div className="muted mt">{selectedKbs.length === 0 ? '当前：全部知识库' : `已选 ${selectedKbs.length} 个知识库`}</div>
-          </div>
-          <div className="card card-pad">
-            <div style={{ fontWeight: 600, marginBottom: 9 }}>记忆与上下文</div>
-            {memory ? (
-              <>
-                <div className="kv"><span className="k">消息数</span><span className="v">{memory.messages}</span></div>
-                <div className="kv"><span className="k">已压缩</span><span className="v">{memory.summarized} 条</span></div>
-                <div className="kv"><span className="k">长期摘要</span><span className="v">{memory.has_summary ? '已生成' : '无'}</span></div>
-                <div className="kv"><span className="k">短期预算</span><span className="v">{memory.token_limit} tokens</span></div>
-                {memory.summary && (
-                  <details className="mt">
-                    <summary className="muted" style={{ cursor: 'pointer' }}>查看摘要</summary>
-                    <div className="muted mt" style={{ lineHeight: 1.6 }}>{memory.summary}</div>
-                  </details>
-                )}
-              </>
-            ) : <span className="muted">加载中…</span>}
           </div>
         </aside>
       </div>

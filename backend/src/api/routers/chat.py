@@ -84,9 +84,10 @@ def list_sessions(request: Request):
     ]
     out = []
     for d in col.aggregate(pipeline):
-        title = (d.get("first_user") or "新会话")
+        stored = svc.rag.sessions.get_title(d["_id"])
+        title = stored or (d.get("first_user") or "新会话")
         out.append({"session_id": d["_id"], "last": d["last"], "messages": d["count"],
-                    "title": title[:40]})
+                    "title": str(title)[:40]})
     return {"sessions": out}
 
 

@@ -73,6 +73,31 @@ class MongoConnector(BaseConnector):
         return SchemaInfo(name=resource, columns=cols, sample_rows=sample,
                           row_count=self.db[resource].estimated_document_count())
 
+    def preview(self, resource: Optional[str] = None, limit: int = 10,
+                max_chars: int = 2000) -> List[RawDocument]:
+        """预览（列名感知脱敏）。"""
+        from src.config import get_env
+        from src.connectors.masking import mask_row, row_to_text
+
+        env = get_env()
+        mask_on = bool(env.get("PII_MASK_ENABLED", True))
+        pats = env.get("PII_MASK_COLUMNS")
+        collections = [resource] if resource else [m.name for m in self.discover()]
+        out: List[RawDocument] = []
+        for coll in collections:
+            for doc in self.db[coll].find().limit(limit):
+                key = str(doc.pop("_id", ""))
+                row = mask_row(doc, pats) if mask_on else doc
+                out.append(RawDocument(
+                    ref=f"{coll}:{key}", text=row_to_text(row)[:max_chars],
+                    title=f"{coll} #{key}",
+                    metadata={"source_type": "database", "datasource_id": self.ds_id,
+                              "collection": coll, "modality": "table", "masked": mask_on},
+                ))
+                if len(out) >= limit:
+                    return out
+        return out
+
     def read(self, resource: Optional[str] = None, watermark: Any = None,
              limit: Optional[int] = None) -> Iterator[RawDocument]:
         collections = [resource] if resource else [m.name for m in self.discover()]
