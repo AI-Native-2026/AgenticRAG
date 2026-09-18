@@ -76,7 +76,7 @@ def list_documents(request: Request, tenant: Optional[str] = None,
 
 
 @router.get("/{ref_doc_id}")
-def get_document(request: Request, ref_doc_id: str, limit: int = 200):
+def get_document(request: Request, ref_doc_id: str, limit: int = 200, mask: bool = True):
     user = get_bearer(request)
     svc = request.app.state.svc
     nodes = svc.docstore.get_nodes_by_ref_doc(ref_doc_id)
@@ -85,17 +85,30 @@ def get_document(request: Request, ref_doc_id: str, limit: int = 200):
     if user["role"] != "admin" and nodes[0].get("tenant") != user["tenant"]:
         raise AppError(403, "FORBIDDEN", "无权访问")
     nodes.sort(key=lambda n: n.get("chunk_idx", 0))
+
+    env = svc.env
+    mask_on = mask and bool(env.get("PII_MASK_ENABLED", True))
+    extra = env.get("PII_MASK_EXTRA")
+    chunks = []
+    for n in nodes[:limit]:
+        text = n["text"]
+        meta = n.get("metadata", {})
+        if mask_on:
+            from src.connectors.masking import mask_any, mask_text
+            text = mask_text(text, extra)
+            meta = mask_any(meta, extra)
+        chunks.append({
+            "node_id": n["node_id"], "chunk_idx": n.get("chunk_idx"),
+            "text": text, "metadata": meta,
+            "datasource_id": n.get("datasource_id"),
+            "source_type": n.get("source_type"),
+        })
     return {
         "ref_doc_id": ref_doc_id,
         "doc_name": nodes[0].get("doc_name"),
         "doc_version": nodes[0].get("doc_version"),
-        "chunks": [
-            {"node_id": n["node_id"], "chunk_idx": n.get("chunk_idx"),
-             "text": n["text"], "metadata": n.get("metadata", {}),
-             "datasource_id": n.get("datasource_id"),
-             "source_type": n.get("source_type")}
-            for n in nodes[:limit]
-        ],
+        "masked": mask_on,
+        "chunks": chunks,
     }
 
 

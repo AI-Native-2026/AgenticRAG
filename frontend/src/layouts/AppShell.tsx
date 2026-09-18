@@ -1,6 +1,6 @@
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import {
-  LayoutDashboard, Layers, Database, Inbox, FileText, Search, MessageSquare,
+  LayoutDashboard, Layers, Database, Inbox, Search, MessageSquare,
   ClipboardCheck, Activity, Users, Settings, Moon, Sun, Menu, LogOut, Bell,
 } from 'lucide-react'
 import { useAuth } from '@/store/auth'
@@ -15,7 +15,8 @@ const NAV: { group: string; items: { to: string; label: string; icon: any }[] }[
       { to: '/knowledge-bases', label: '知识库', icon: Layers },
       { to: '/datasources', label: '数据源', icon: Database },
       { to: '/jobs', label: '入库任务', icon: Inbox },
-      { to: '/documents', label: '文档浏览', icon: FileText },
+      // 文档浏览已暂时禁用（会展示未脱敏的原始 chunk，涉及隐私合规）
+      // { to: '/documents', label: '文档浏览', icon: FileText },
     ],
   },
   {

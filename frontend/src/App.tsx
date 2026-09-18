@@ -7,7 +7,6 @@ import Dashboard from '@/pages/Dashboard'
 import KnowledgeBases from '@/pages/KnowledgeBases'
 import DataSources from '@/pages/DataSources'
 import Jobs from '@/pages/Jobs'
-import Documents from '@/pages/Documents'
 import Retrieval from '@/pages/Retrieval'
 import Chat from '@/pages/Chat'
 import Eval from '@/pages/Eval'
@@ -41,7 +40,6 @@ export default function App() {
           <Route path="knowledge-bases" element={<KnowledgeBases />} />
           <Route path="datasources" element={<DataSources />} />
           <Route path="jobs" element={<Jobs />} />
-          <Route path="documents" element={<Documents />} />
           <Route path="retrieval" element={<Retrieval />} />
           <Route path="chat" element={<Chat />} />
           <Route path="eval" element={<Eval />} />
