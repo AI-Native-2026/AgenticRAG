@@ -61,18 +61,22 @@ def get_vlm(model_path: Optional[str] = None, device: Optional[str] = None) -> T
     return _cache[key]
 
 
-def answer_image(image_path: str, question: str, max_new_tokens: int = 320) -> str:
+def answer_image(image_path: str, question: str, system: Optional[str] = None,
+                 max_new_tokens: int = 320) -> str:
     """对图片进行视觉问答（VQA）。"""
     import torch
 
     model, processor = get_vlm()
-    messages = [{
+    messages = []
+    if system:
+        messages.append({"role": "system", "content": system})
+    messages.append({
         "role": "user",
         "content": [
             {"type": "image", "image": str(image_path)},
             {"type": "text", "text": question},
         ],
-    }]
+    })
     text = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
     inputs = processor(text=[text], images=[str(image_path)], return_tensors="pt")
     try:

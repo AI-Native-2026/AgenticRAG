@@ -204,7 +204,13 @@ async def chat_image(request: Request, file: UploadFile = File(...), question: s
                 import asyncio
 
                 from src.llm.vision import answer_image
-                answer = await asyncio.to_thread(answer_image, tmp, q)
+                vlm_system = (
+                    "你是小K，企业的知识中台助手。本平台具备图片能力（以图搜图、图片问答）。"
+                    "请直接依据图片内容用中文、Markdown 回答用户问题；"
+                    "若用户想找相似图片，请提示其使用本平台的「以图搜图」功能或让我用 find_similar_images 查找；"
+                    "不要建议用户去 Google/百度/社交媒体等外部工具。不要输出角色前缀。"
+                )
+                answer = await asyncio.to_thread(answer_image, tmp, q, vlm_system)
             except Exception as e:  # noqa: BLE001
                 logger.warning("VLM 问答失败，回退文本模型: %s", e)
         if not answer:
