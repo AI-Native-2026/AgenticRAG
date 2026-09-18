@@ -31,28 +31,54 @@ from src.retrieval.hybrid import HybridRetriever
 from src.retrieval.rerank import Reranker
 
 
-class RequestContext(threading.local):
-    role: str = "member"
-    request_id: str = "unknown"
-    tenant: Optional[str] = None
-    emit: Optional[Any] = None
+import contextvars
+
+
+class RequestContext:
+    """当前请求上下文（role / request_id / tenant / emit）。
+
+    使用 contextvars 而非 threading.local：Agent 的工具可能在 asyncio 的
+    工作线程中执行，contextvars 会自动随上下文传播，threading.local 不会。
+    """
+
+    def __init__(self):
+        self._role = contextvars.ContextVar("ctx_role", default="member")
+        self._rid = contextvars.ContextVar("ctx_rid", default="unknown")
+        self._tenant = contextvars.ContextVar("ctx_tenant", default=None)
+        self._emit = contextvars.ContextVar("ctx_emit", default=None)
+
+    @property
+    def role(self):
+        return self._role.get()
+
+    @property
+    def request_id(self):
+        return self._rid.get()
+
+    @property
+    def tenant(self):
+        return self._tenant.get()
+
+    @property
+    def emit(self):
+        return self._emit.get()
 
 
 _CTX = RequestContext()
 
 
 def set_ctx(role: str, request_id: str, tenant: Optional[str] = None, emit=None) -> None:
-    _CTX.role = role
-    _CTX.request_id = request_id
-    _CTX.tenant = tenant
-    _CTX.emit = emit
+    _CTX._role.set(role)
+    _CTX._rid.set(request_id)
+    _CTX._tenant.set(tenant)
+    _CTX._emit.set(emit)
 
 
 def clear_ctx() -> None:
-    _CTX.role = "member"
-    _CTX.request_id = "unknown"
-    _CTX.tenant = None
-    _CTX.emit = None
+    _CTX._role.set("member")
+    _CTX._rid.set("unknown")
+    _CTX._tenant.set(None)
+    _CTX._emit.set(None)
 
 
 def emit_step(event_type: str, **data) -> None:
