@@ -158,6 +158,14 @@ chunk = {
 以图搜图接口：`POST /v1/retrieval/search-by-image`（上传图片 → 视觉相似检索）；
 媒体访问：`GET /v1/media/{node_id}`（校验租户归属）。
 
+### 5.2 图片理解（VQA）
+
+- `POST /v1/chat/image`：上传图片 + 问题 → 优先用 **Qwen2.5-VL-3B** 视觉模型直接理解图片作答；
+  失败/未启用时回退「OCR + 以图检索 + 文本 LLM」。
+- 模型惰性加载并缓存（`src/llm/vision.py`），`VLM_DEVICE=auto|cuda|cpu` 控制设备；
+  `auto` 会在显存允许时用 GPU，否则 CPU/offload。
+- 对话交互：附图**并提问** → 直接作答；**仅附图** → 询问「以图搜图 / 检索相似内容」。
+
 ## 6. Agent 层
 
 工具（注册中心 + 角色白名单 + 审计）：
