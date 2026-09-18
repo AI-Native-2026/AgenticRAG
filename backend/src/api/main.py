@@ -75,3 +75,11 @@ async def unhandled_handler(request: Request, exc: Exception):
 
 
 app.include_router(api_router)
+
+# 可选：若前端已构建（frontend/dist），由后端同端口托管，实现单端口部署
+_FRONTEND_DIST = Path(ENV["PROJECT_ROOT"]).parent / "frontend" / "dist"
+if _FRONTEND_DIST.exists():
+    from fastapi.staticfiles import StaticFiles
+
+    app.mount("/", StaticFiles(directory=str(_FRONTEND_DIST), html=True), name="ui")
+    logger.info("已挂载前端静态资源：%s", _FRONTEND_DIST)
