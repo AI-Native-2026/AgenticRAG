@@ -86,6 +86,21 @@ class BaseConnector(abc.ABC):
         """描述资源结构（默认不支持）。"""
         raise ConnectorError(f"{self.subtype} 连接器不支持 describe")
 
+    def preview(self, resource: Optional[str] = None, limit: int = 10,
+                max_chars: int = 2000) -> List[RawDocument]:
+        """轻量预览：只取前 limit 条并截断文本，避免大文件占用资源。
+
+        连接器可覆盖以做更省的读取（如文件只读头部）。
+        """
+        out: List[RawDocument] = []
+        for i, doc in enumerate(self.read(resource=resource, limit=limit)):
+            truncated = len(doc.text) > max_chars
+            out.append(RawDocument(ref=doc.ref, text=doc.text[:max_chars], title=doc.title,
+                                   metadata={**doc.metadata, "truncated": truncated}))
+            if i + 1 >= limit:
+                break
+        return out
+
     def live_query(self, question: str, **kwargs) -> Dict[str, Any]:
         """实时查询（默认不支持）。"""
         raise ConnectorError(f"{self.subtype} 连接器不支持实时查询")

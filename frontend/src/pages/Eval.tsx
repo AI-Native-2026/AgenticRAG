@@ -10,7 +10,8 @@ export default function Eval() {
   const [baseline, setBaseline] = useState<any>(null)
   const [running, setRunning] = useState(false)
   const [open, setOpen] = useState(false)
-  const [form, setForm] = useState({ query: '', golden_docs: '', golden_keywords: '' })
+  const [form, setForm] = useState({ query: '', golden_docs: '', golden_keywords: '', kb_id: '' })
+  const [kbs, setKbs] = useState<any[]>([])
 
   async function load() {
     try {
@@ -21,6 +22,7 @@ export default function Eval() {
   useEffect(() => {
     load()
     api.get<any>('/v1/eval/baseline').then(setBaseline).catch(() => {})
+    api.get<any>('/v1/knowledge-bases').then((r) => setKbs(r.knowledge_bases)).catch(() => {})
   }, [])
 
   async function run() {
@@ -48,9 +50,10 @@ export default function Eval() {
         query: form.query.trim(),
         golden_docs: form.golden_docs.split(',').map((s) => s.trim()).filter(Boolean),
         golden_keywords: form.golden_keywords.split(',').map((s) => s.trim()).filter(Boolean),
+        kb_id: form.kb_id || null,
       })
       toast.ok('已新增评测项')
-      setOpen(false); setForm({ query: '', golden_docs: '', golden_keywords: '' }); setReport(null); load()
+      setOpen(false); setForm({ query: '', golden_docs: '', golden_keywords: '', kb_id: '' }); setReport(null); load()
     } catch (e: any) { toast.err(e.message) }
   }
 
@@ -116,6 +119,12 @@ export default function Eval() {
           <input id="ev-d" className="input" value={form.golden_docs} onChange={(e) => setForm({ ...form, golden_docs: e.target.value })} placeholder="apple_iphone_17.md" /></div>
         <div className="field"><label htmlFor="ev-k">Golden Keywords（逗号分隔，可选）</label>
           <input id="ev-k" className="input" value={form.golden_keywords} onChange={(e) => setForm({ ...form, golden_keywords: e.target.value })} /></div>
+        <div className="field"><label htmlFor="ev-scope">检索范围</label>
+          <select id="ev-scope" className="select" value={form.kb_id} onChange={(e) => setForm({ ...form, kb_id: e.target.value })}>
+            <option value="">当前租户全部知识（默认）</option>
+            {kbs.map((k) => <option key={k.kb_id} value={k.kb_id}>{k.name}</option>)}
+          </select></div>
+        <div className="note">评测默认按登录租户隔离；选择知识库可进一步限定到该知识库的数据源。</div>
       </Modal>
     </>
   )

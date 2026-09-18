@@ -105,8 +105,53 @@ class FileConnector(BaseConnector):
             except OSError:
                 size = 0
             out.append(ResourceMeta(name=str(p), kind="file", rows=size,
-                                    extra={"suffix": p.suffix.lower()}))
+                                    extra={"suffix": p.suffix.lower(), "size": size,
+                                           "name": p.name}))
         return out
+
+    def preview(self, resource: Optional[str] = None, limit: int = 10,
+                max_chars: int = 2000) -> List[RawDocument]:
+        """预览只读文件头部，避免大文件整体加载。"""
+        targets = [Path(resource)] if resource else self._iter_files()
+        out: List[RawDocument] = []
+        for p in targets:
+            if not p.exists() or not p.is_file():
+                continue
+            try:
+                size = p.stat().st_size
+            except OSError:
+                size = 0
+            text = self._head(p, max_chars)
+            out.append(RawDocument(
+                ref=str(p), text=text, title=p.name,
+                metadata={**self._base_meta(p), "size": size,
+                          "truncated": size > max_chars},
+            ))
+            if len(out) >= limit:
+                break
+        return out
+
+    def _head(self, p: Path, max_chars: int) -> str:
+        """只读文件头部内容（文本类按字符，表格类按行，二进制文档回退）。"""
+        suffix = p.suffix.lower()
+        if suffix in SUPPORTED_TEXT or suffix in SUPPORTED_HTML:
+            with p.open("r", encoding="utf-8", errors="replace") as f:
+                return f.read(max_chars)
+        if suffix in SUPPORTED_TABULAR:
+            lines: List[str] = []
+            with p.open("r", encoding="utf-8", errors="replace", newline="") as f:
+                reader = csv.reader(f, delimiter="\t" if suffix == ".tsv" else ",")
+                for i, row in enumerate(reader):
+                    if i >= 20:
+                        break
+                    lines.append(", ".join(row))
+            return "\n".join(lines)[:max_chars]
+        if suffix in SUPPORTED_DOC:
+            try:
+                return next(iter(self._read_document(p, self._base_meta(p)))).text[:max_chars]
+            except Exception:  # noqa: BLE001
+                return "(无法预览该文件)"
+        return ""
 
     def describe(self, resource: str) -> Any:
         from src.connectors.base import SchemaInfo

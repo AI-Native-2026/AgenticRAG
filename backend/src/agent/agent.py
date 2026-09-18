@@ -23,6 +23,7 @@ from llama_index.core.llms import ChatMessage
 from llama_index.core.workflow import Context
 
 from src.config import get_env
+from src.agent.memory import ContextManager
 from src.observability.events import make_event, new_request_id
 from src.observability.sink import get_sink
 from src.storage.lineage import LineageStore
@@ -30,15 +31,18 @@ from src.storage.metering import Metering
 
 
 class SessionStore:
-    """会话持久化（MongoDB）。表：agentic_rag.sessions。"""
+    """会话持久化（MongoDB）。表：agentic_rag.sessions / session_summaries。"""
 
     def __init__(self):
         import pymongo
 
         env = get_env()
         self.client = pymongo.MongoClient(env["MONGO_URI"], serverSelectionTimeoutMS=5000)
-        self.col = self.client[env["MONGO_DB"]]["sessions"]
+        db = self.client[env["MONGO_DB"]]
+        self.col = db["sessions"]
         self.col.create_index("session_id")
+        self.summaries = db["session_summaries"]
+        self.summaries.create_index("updated_at")
 
     def append(self, session_id: str, role: str, content: str) -> None:
         self.col.insert_one(
@@ -48,6 +52,23 @@ class SessionStore:
     def history(self, session_id: str, limit: int = 50) -> List[Dict[str, str]]:
         items = list(self.col.find({"session_id": session_id}).sort("ts", 1).limit(limit))
         return [{"role": i["role"], "content": i["content"]} for i in items]
+
+    # ---------- 长期记忆（摘要） ----------
+
+    def get_summary(self, session_id: str) -> Optional[Dict[str, Any]]:
+        return self.summaries.find_one({"_id": session_id})
+
+    def set_summary(self, session_id: str, summary: str, covered: int) -> None:
+        self.summaries.replace_one(
+            {"_id": session_id},
+            {"_id": session_id, "summary": summary, "covered": covered, "updated_at": time.time()},
+            upsert=True,
+        )
+
+    def clear(self, session_id: str) -> int:
+        n = self.col.delete_many({"session_id": session_id}).deleted_count
+        self.summaries.delete_one({"_id": session_id})
+        return n
 
 
 def build_system_prompt(role: str = "member", tenant: Optional[str] = None) -> str:
@@ -75,6 +96,7 @@ class AgenticRAG:
         self.sessions = SessionStore()
         self.metering = Metering()
         self.lineage = LineageStore()
+        self.context = ContextManager(self.sessions, llm)
 
     def build_agent(self, agent_type: str = "function", role: str = "member",
                     tenant: Optional[str] = None) -> FunctionAgent:
@@ -162,14 +184,16 @@ class AgenticRAG:
         get_sink().record(make_event("request_start", request_id=request_id, tenant=tenant))
 
         ctx = Context(agent)
-        # 恢复历史：ChatMemoryBuffer 自动裁剪超长历史（多轮 token 膨胀的解法）
-        history = self.sessions.history(session_id, limit=10)
-        if history:
+        # 上下文管理：先压缩超窗历史（长期记忆），再装载预算内的摘要 + 最近原文（短期记忆）
+        self.context.maybe_compress(session_id)
+        prior_msgs = self.context.load_messages(session_id)
+        if prior_msgs:
             from llama_index.core.memory import ChatMemoryBuffer
 
-            prior = [ChatMessage(role=h["role"], content=h["content"]) for h in history]
+            prior = [ChatMessage(role=m["role"], content=m["content"]) for m in prior_msgs]
             await ctx.store.set(
-                "memory", ChatMemoryBuffer.from_defaults(chat_history=prior)
+                "memory",
+                ChatMemoryBuffer.from_defaults(chat_history=prior, token_limit=self.context.token_limit),
             )
 
         response = await agent.run(question, ctx=ctx)

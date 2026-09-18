@@ -92,5 +92,15 @@ def list_sessions(request: Request):
 def delete_session(session_id: str, request: Request):
     get_bearer(request)
     svc = request.app.state.svc
-    res = svc.rag.sessions.col.delete_many({"session_id": session_id})
-    return {"deleted": res.deleted_count, "session_id": session_id}
+    n = svc.rag.sessions.clear(session_id)
+    return {"deleted": n, "session_id": session_id}
+
+
+@router.get("/sessions/{session_id}/memory")
+def session_memory(session_id: str, request: Request):
+    get_bearer(request)
+    svc = request.app.state.svc
+    stats = svc.rag.context.stats(session_id)
+    rec = svc.rag.sessions.get_summary(session_id)
+    stats["summary"] = rec.get("summary") if rec else None
+    return stats

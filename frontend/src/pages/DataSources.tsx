@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Plus, RefreshCw, Database, FileText, Globe, Play } from 'lucide-react'
+import { Plus, RefreshCw, Database, FileText, Globe, Play, Search, ChevronLeft, ChevronRight } from 'lucide-react'
 import { api } from '@/api/client'
 import { Drawer, Loading, Modal, Progress, StatusPill, Tabs, Empty } from '@/components/ui'
 import { toast } from '@/store/toast'
@@ -21,6 +21,15 @@ const emptyForm = {
   name: '', type: 'file', subtype: 'directory',
   path: '', url: '', host: 'localhost', port: '', database: '',
   username: '', password: '',
+}
+
+function formatSize(bytes: number) {
+  if (!bytes) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB']
+  let i = 0
+  let v = bytes
+  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++ }
+  return `${v.toFixed(i === 0 ? 0 : 1)} ${units[i]}`
 }
 
 export default function DataSources() {
@@ -48,9 +57,11 @@ export default function DataSources() {
       return { name: form.name, type: 'web', subtype: 'web', config: { url: form.url }, credentials: {} }
     }
     const isMongo = form.subtype === 'mongodb'
-    const config = isMongo
-      ? { host: form.host, port: Number(form.port) || 27017, database: form.database }
-      : { dialect: form.subtype, host: form.host, port: Number(form.port) || undefined, database: form.database }
+    const config = form.subtype === 'sqlite'
+      ? { dialect: 'sqlite', path: form.database }
+      : isMongo
+        ? { host: form.host, port: Number(form.port) || 27017, database: form.database }
+        : { dialect: form.subtype, host: form.host, port: Number(form.port) || undefined, database: form.database }
     const credentials = form.username ? { username: form.username, password: form.password } : {}
     return { name: form.name, type: 'database', subtype: form.subtype, config, credentials }
   }
@@ -219,24 +230,64 @@ export default function DataSources() {
   )
 }
 
+/* ================= 详情抽屉 ================= */
+
+interface FileItem { path: string; name: string; suffix: string; size: number }
+
 function DatasourceDrawer({ ds, onClose, onSynced }: { ds: Datasource | null; onClose: () => void; onSynced: () => void }) {
   const [tab, setTab] = useState('连接配置')
   const [tables, setTables] = useState<TableSchema[] | null>(null)
   const [preview, setPreview] = useState<any[] | null>(null)
   const [job, setJob] = useState<Job | null>(null)
   const [mode, setMode] = useState('full')
-  const tabs = ds?.type === 'database' ? ['连接配置', 'Schema', '预览', '同步'] : ['连接配置', '预览', '同步']
+
+  // 文件目录分页
+  const [files, setFiles] = useState<FileItem[] | null>(null)
+  const [fileTotal, setFileTotal] = useState(0)
+  const [filePage, setFilePage] = useState(1)
+  const [fileQ, setFileQ] = useState('')
+  const [selectedFile, setSelectedFile] = useState<string | null>(null)
+  const [filePreview, setFilePreview] = useState<any[] | null>(null)
+
+  const isFile = ds?.type === 'file'
+  const isDb = ds?.type === 'database'
+  const tabs = isDb ? ['连接配置', 'Schema', '预览', '同步'] : ['连接配置', '预览', '同步']
 
   useEffect(() => {
     if (!ds) return
     setTab('连接配置'); setTables(null); setPreview(null); setJob(null)
+    setFiles(null); setFilePage(1); setFileQ(''); setSelectedFile(null); setFilePreview(null)
   }, [ds])
 
   useEffect(() => {
     if (!ds) return
-    if (tab === 'Schema') api.get<{ tables: TableSchema[] }>(`/v1/datasources/${ds.ds_id}/schema`).then((r) => setTables(r.tables)).catch(() => setTables([]))
-    if (tab === '预览') api.get<{ preview: any[] }>(`/v1/datasources/${ds.ds_id}/preview?limit=10`).then((r) => setPreview(r.preview)).catch((e) => { toast.err(e.message); setPreview([]) })
+    if (tab === 'Schema' && isDb) {
+      api.get<{ tables: TableSchema[] }>(`/v1/datasources/${ds.ds_id}/schema`).then((r) => setTables(r.tables)).catch(() => setTables([]))
+    }
+    if (tab === '预览') {
+      if (isFile) loadFiles(ds.ds_id, 1, '')
+      else api.get<{ preview: any[] }>(`/v1/datasources/${ds.ds_id}/preview?limit=10`).then((r) => setPreview(r.preview)).catch((e) => { toast.err(e.message); setPreview([]) })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, ds])
+
+  async function loadFiles(dsId: string, page: number, q: string) {
+    setFiles(null)
+    try {
+      const r = await api.get<{ items: FileItem[]; total: number; page: number }>(
+        `/v1/datasources/${dsId}/files?page=${page}&page_size=10&q=${encodeURIComponent(q)}`)
+      setFiles(r.items); setFileTotal(r.total); setFilePage(r.page)
+    } catch (e: any) { toast.err(e.message); setFiles([]); setFileTotal(0) }
+  }
+
+  async function openFile(dsId: string, path: string) {
+    setSelectedFile(path); setFilePreview(null)
+    try {
+      const r = await api.get<{ preview: any[] }>(
+        `/v1/datasources/${dsId}/preview?resource=${encodeURIComponent(path)}&limit=3`)
+      setFilePreview(r.preview)
+    } catch (e: any) { toast.err(e.message); setFilePreview([]) }
+  }
 
   async function runSync() {
     if (!ds) return
@@ -257,6 +308,8 @@ function DatasourceDrawer({ ds, onClose, onSynced }: { ds: Datasource | null; on
       } catch { clearInterval(t) }
     }, 1500)
   }
+
+  const totalPages = Math.max(1, Math.ceil(fileTotal / 10))
 
   return (
     <Drawer open={!!ds} title={ds?.name || ''} onClose={onClose}
@@ -287,7 +340,7 @@ function DatasourceDrawer({ ds, onClose, onSynced }: { ds: Datasource | null; on
             </>
           )}
 
-          {tab === 'Schema' && (
+          {tab === 'Schema' && isDb && (
             !tables ? <Loading /> : tables.length === 0 ? <Empty title="暂无表结构" hint="同步后会自动抽取" /> : (
               <div className="tree">
                 {tables.map((t) => (
@@ -304,7 +357,57 @@ function DatasourceDrawer({ ds, onClose, onSynced }: { ds: Datasource | null; on
             )
           )}
 
-          {tab === '预览' && (
+          {tab === '预览' && isFile && (
+            <>
+              <div className="row mb">
+                <input className="input" style={{ flex: 1 }} placeholder="搜索文件名…" value={fileQ}
+                  onChange={(e) => setFileQ(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') loadFiles(ds.ds_id, 1, fileQ) }} />
+                <button className="btn btn-o btn-sm" onClick={() => loadFiles(ds.ds_id, 1, fileQ)}><Search size={14} /> 搜索</button>
+              </div>
+              <div className="muted mb">共 {fileTotal} 个文件 · 每页 10 个</div>
+
+              {!files ? <Loading /> : files.length === 0 ? <Empty title="无文件" /> : (
+                <div className="tbl-wrap">
+                  <table className="tbl">
+                    <thead><tr><th>文件</th><th>类型</th><th>大小</th></tr></thead>
+                    <tbody>
+                      {files.map((f) => (
+                        <tr key={f.path} className="clickable" onClick={() => openFile(ds.ds_id, f.path)}>
+                          <td>{f.name}</td>
+                          <td><span className="tag">{f.suffix || '—'}</span></td>
+                          <td className="mono">{formatSize(f.size)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              <div className="row mt" style={{ justifyContent: 'center' }}>
+                <button className="btn btn-o btn-sm" disabled={filePage <= 1} onClick={() => loadFiles(ds.ds_id, filePage - 1, fileQ)}><ChevronLeft size={14} /></button>
+                <span className="muted">{filePage} / {totalPages}</span>
+                <button className="btn btn-o btn-sm" disabled={filePage >= totalPages} onClick={() => loadFiles(ds.ds_id, filePage + 1, fileQ)}><ChevronRight size={14} /></button>
+              </div>
+
+              {selectedFile && (
+                <>
+                  <div className="divider" />
+                  <div className="row mb"><b style={{ fontSize: 13 }}>{selectedFile.split('/').pop()}</b></div>
+                  {!filePreview ? <Loading /> : filePreview.length === 0 ? <Empty title="无法预览" /> : (
+                    filePreview.map((p, i) => (
+                      <div className="res" key={i}>
+                        <div className="rh"><span className="rank">{i + 1}</span>{p.metadata?.truncated && <span className="tag">已截断</span>}<span className="spacer" /><span className="muted">{formatSize(p.metadata?.size || 0)}</span></div>
+                        <div className="txt">{p.text}</div>
+                      </div>
+                    ))
+                  )}
+                </>
+              )}
+            </>
+          )}
+
+          {tab === '预览' && !isFile && (
             !preview ? <Loading /> : preview.length === 0 ? <Empty title="暂无数据" /> : (
               <div style={{ display: 'grid', gap: 10 }}>
                 {preview.map((p, i) => (

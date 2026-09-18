@@ -101,6 +101,16 @@ def get_env() -> Dict[str, Any]:
     config["SEMANTIC_CACHE_THRESHOLD"] = float(_get("SEMANTIC_CACHE_THRESHOLD", "0.92"))
     config["DEVICE"] = "cuda" if (os.path.exists("/usr/local/cuda") or os.path.exists("/dev/nvidia0")) else "cpu"
 
+    # ---- 会话上下文管理 ----
+    config["MEMORY_TOKEN_LIMIT"] = int(_get("MEMORY_TOKEN_LIMIT", "3000"))       # 短期记忆 token 预算
+    config["MEMORY_RECENT_TURNS"] = int(_get("MEMORY_RECENT_TURNS", "6"))        # 保留最近 N 轮原文
+    config["MEMORY_SUMMARY_ENABLED"] = _get("MEMORY_SUMMARY_ENABLED", "true").lower() == "true"
+
+    # ---- 预览性能 ----
+    config["PREVIEW_MAX_CHARS"] = int(_get("PREVIEW_MAX_CHARS", "2000"))         # 单条预览最大字符
+    config["PREVIEW_PAGE_SIZE"] = int(_get("PREVIEW_PAGE_SIZE", "10"))           # 文件列表每页
+    config["DISCOVER_MAX_FILES"] = int(_get("DISCOVER_MAX_FILES", "5000"))       # 目录扫描上限
+
     # ---- 队列 ----
     config["KAFKA_BOOTSTRAP"] = _get("KAFKA_BOOTSTRAP", "localhost:9092")
     config["QUEUE_BACKEND"] = _get("QUEUE_BACKEND", "kafka")  # kafka | dev

@@ -21,6 +21,7 @@ export default function Chat() {
   const [busy, setBusy] = useState(false)
   const [sessionId, setSessionId] = useState<string>(() => localStorage.getItem(SESSION_KEY) || newSessionId())
   const [sessions, setSessions] = useState<SessionMeta[]>([])
+  const [memory, setMemory] = useState<any>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
 
   function scrollDown() {
@@ -57,6 +58,10 @@ export default function Chat() {
     loadHistory(sessionId)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  useEffect(() => {
+    api.get<any>(`/v1/sessions/${sessionId}/memory`).then(setMemory).catch(() => setMemory(null))
+  }, [sessionId, messages.length])
 
   async function switchSession(id: string) {
     if (busy) return
@@ -177,8 +182,22 @@ export default function Chat() {
             </div>
           </div>
           <div className="card card-pad">
-            <div style={{ fontWeight: 600, marginBottom: 9 }}>记忆与持久化</div>
-            <div className="note">会话与消息持久化在 MongoDB，刷新/切换会话不丢失；多轮上下文自动恢复。</div>
+            <div style={{ fontWeight: 600, marginBottom: 9 }}>记忆与上下文</div>
+            {memory ? (
+              <>
+                <div className="kv"><span className="k">消息数</span><span className="v">{memory.messages}</span></div>
+                <div className="kv"><span className="k">已压缩</span><span className="v">{memory.summarized} 条</span></div>
+                <div className="kv"><span className="k">长期摘要</span><span className="v">{memory.has_summary ? '已生成' : '无'}</span></div>
+                <div className="kv"><span className="k">短期预算</span><span className="v">{memory.token_limit} tokens</span></div>
+                {memory.summary && (
+                  <details className="mt">
+                    <summary className="muted" style={{ cursor: 'pointer' }}>查看摘要</summary>
+                    <div className="muted mt" style={{ lineHeight: 1.6 }}>{memory.summary}</div>
+                  </details>
+                )}
+              </>
+            ) : <span className="muted">加载中…</span>}
+            <div className="note mt">超出窗口的旧消息会自动压缩为长期摘要，最近若干轮保留原文。</div>
           </div>
         </aside>
       </div>

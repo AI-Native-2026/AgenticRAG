@@ -121,7 +121,8 @@ def test_saved(request: Request, ds_id: str):
 
 
 @router.get("/{ds_id}/resources")
-def discover(request: Request, ds_id: str):
+def discover(request: Request, ds_id: str, page: int = 1, page_size: int = 10, q: str = ""):
+    """列出资源（文件/表），分页返回，避免大目录一次性加载。"""
     user = get_bearer(request)
     svc = request.app.state.svc
     raw = svc.datasource_store.get_raw(ds_id)
@@ -129,7 +130,50 @@ def discover(request: Request, ds_id: str):
     conn = svc.sync_service.build_connector(raw)
     try:
         items = conn.discover()
-        return {"resources": [r.__dict__ for r in items]}
+        if q:
+            ql = q.lower()
+            items = [r for r in items if ql in r.name.lower()]
+        total = len(items)
+        page = max(1, page)
+        page_size = max(1, min(page_size, 100))
+        start = (page - 1) * page_size
+        page_items = items[start:start + page_size]
+        return {
+            "items": [{"name": r.name, "kind": r.kind, "size": r.extra.get("size", r.rows),
+                       "suffix": r.extra.get("suffix", ""), "columns": r.columns} for r in page_items],
+            "total": total, "page": page, "page_size": page_size,
+        }
+    finally:
+        conn.close()
+
+
+@router.get("/{ds_id}/files")
+def list_files(request: Request, ds_id: str, page: int = 1, page_size: int = 10, q: str = ""):
+    """文件目录分页列表（名称 / 大小 / 类型）。"""
+    user = get_bearer(request)
+    svc = request.app.state.svc
+    raw = svc.datasource_store.get_raw(ds_id)
+    _owned(svc, ds_id, user)
+    if raw.get("type") != "file":
+        return {"items": [], "total": 0, "page": page, "page_size": page_size}
+    conn = svc.sync_service.build_connector(raw)
+    try:
+        from pathlib import Path as _P
+        files = conn.discover()
+        if q:
+            ql = q.lower()
+            files = [f for f in files if ql in f.name.lower()]
+        total = len(files)
+        page = max(1, page)
+        page_size = max(1, min(page_size, 100))
+        start = (page - 1) * page_size
+        items = []
+        for f in files[start:start + page_size]:
+            p = _P(f.name)
+            items.append({"path": f.name, "name": p.name,
+                          "suffix": f.extra.get("suffix", p.suffix.lower()),
+                          "size": f.extra.get("size", f.rows)})
+        return {"items": items, "total": total, "page": page, "page_size": page_size}
     finally:
         conn.close()
 
@@ -143,20 +187,20 @@ def schema(request: Request, ds_id: str):
 
 
 @router.get("/{ds_id}/preview")
-def preview(request: Request, ds_id: str, resource: Optional[str] = None, limit: int = 20):
+def preview(request: Request, ds_id: str, resource: Optional[str] = None, limit: int = 10):
+    """轻量预览：限制条数与单条字符数，避免大文件占用资源。"""
     user = get_bearer(request)
     svc = request.app.state.svc
     raw = svc.datasource_store.get_raw(ds_id)
     _owned(svc, ds_id, user)
+    env = svc.env
+    limit = max(1, min(limit, 50))
     conn = svc.sync_service.build_connector(raw)
     try:
-        docs = []
-        for i, doc in enumerate(conn.read(resource=resource, limit=limit)):
-            docs.append({"ref": doc.ref, "title": doc.title,
-                         "text": doc.text[:500], "metadata": doc.metadata})
-            if i + 1 >= limit:
-                break
-        return {"preview": docs}
+        docs = conn.preview(resource=resource, limit=limit,
+                            max_chars=int(env.get("PREVIEW_MAX_CHARS", 2000)))
+        return {"preview": [{"ref": d.ref, "title": d.title, "text": d.text,
+                             "metadata": d.metadata} for d in docs]}
     finally:
         conn.close()
 

@@ -55,6 +55,8 @@ def add_item(request: Request, body: Dict[str, Any]):
         "query": query,
         "golden_docs": body.get("golden_docs") or [],
         "golden_keywords": body.get("golden_keywords") or [],
+        "datasource_id": body.get("datasource_id"),
+        "kb_id": body.get("kb_id"),
     })
     _save_set(items)
     return {"count": len(items)}
@@ -74,9 +76,15 @@ def delete_item(request: Request, index: int):
 
 @router.post("/run")
 def run_eval(request: Request):
-    """对评测集执行检索，计算 Hit Rate / MRR（不调用 LLM 裁判）。"""
-    get_bearer(request)
+    """对评测集执行检索，计算 Hit Rate / MRR（不调用 LLM 裁判）。
+
+    评测范围：
+      - 默认按当前登录租户隔离（tenant）
+      - 评测项可带 datasource_id / kb_id 进一步限定到具体数据源或知识库
+    """
+    user = get_bearer(request)
     svc = request.app.state.svc
+    tenant = user["tenant"]
     items = _load_set()
     hits = 0
     rr_sum = 0.0
@@ -84,9 +92,26 @@ def run_eval(request: Request):
     for it in items:
         query = it.get("query", "")
         golden = set(it.get("golden_docs", []) or [])
-        results = svc.hybrid.retrieve(query, final_top_k=10)
+        allowed_ds = None
+        if it.get("kb_id"):
+            kb = svc.kb_store.get(it["kb_id"])
+            allowed_ds = set((kb or {}).get("datasource_ids", []))
+        elif it.get("datasource_id"):
+            allowed_ds = {it["datasource_id"]}
+
+        results = svc.hybrid.retrieve(query, final_top_k=20)
+        filtered = []
+        for r in results:
+            meta = r.get("metadata") or {}
+            if tenant and meta.get("tenant") != tenant:
+                continue
+            if allowed_ds is not None and meta.get("datasource_id") not in allowed_ds:
+                continue
+            filtered.append(r)
+        filtered = filtered[:10]
+
         rank = 0
-        for i, r in enumerate(results):
+        for i, r in enumerate(filtered):
             name = (r.get("metadata") or {}).get("doc_name", "")
             if name in golden:
                 rank = i + 1
@@ -94,12 +119,14 @@ def run_eval(request: Request):
         if rank:
             hits += 1
             rr_sum += 1.0 / rank
-        details.append({"query": query, "hit": bool(rank), "rank": rank or None})
+        details.append({"query": query, "hit": bool(rank), "rank": rank or None,
+                        "scope": it.get("kb_id") or it.get("datasource_id") or "tenant"})
     n = len(items) or 1
     report = {
         "count": len(items),
         "hit_rate": round(hits / n, 4),
         "mrr": round(rr_sum / n, 4),
+        "tenant": tenant,
         "details": details,
     }
     return {"report": report}
