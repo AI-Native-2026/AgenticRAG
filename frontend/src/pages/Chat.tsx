@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Plus, Send, Trash2, Image as ImageIcon, X, Search } from 'lucide-react'
-import { api, chatStream, searchByImage } from '@/api/client'
+import { api, chatStream, chatImageStream, searchByImage } from '@/api/client'
 import { toast } from '@/store/toast'
 import { Modal } from '@/components/ui'
 import MarkdownView from '@/components/MarkdownView'
@@ -116,7 +116,8 @@ export default function Chat() {
       const caption = input.trim()
       setPendingImage(null)
       setInput('')
-      askImageChoice(file, url, caption)
+      if (caption) await runImageChat(file, url, caption)
+      else askImageChoice(file, url, caption)
       return
     }
     const q = input.trim()
@@ -172,6 +173,33 @@ export default function Chat() {
       { role: 'user', content: caption, steps: [], image: url },
       { role: 'bot', content: '你想怎么处理这张图片？', steps: [], askImage: true, imageFile: file }])
     scrollDown()
+  }
+
+  async function runImageChat(file: File, url: string, question: string) {
+    setMessages((m) => [...m,
+      { role: 'user', content: question, steps: [], image: url },
+      { role: 'bot', content: '', steps: [], streaming: true }])
+    scrollDown()
+    setBusy(true)
+    try {
+      await chatImageStream(file, question, sessionId, (event, data) => {
+        if (event === 'token') {
+          updateBot((msg) => ({ ...msg, content: msg.content + (data.content || '') }))
+          scrollDown()
+        } else if (event === 'sources') {
+          updateBot((msg) => ({ ...msg, sources: data.items || [] }))
+        } else if (event === 'error') {
+          toast.err(data.message || '图片问答失败')
+        }
+      }, { kbIds: selectedKbs })
+    } catch (e: any) {
+      toast.err(e.message)
+    } finally {
+      updateBot((msg) => ({ ...msg, streaming: false }))
+      setBusy(false)
+      scrollDown()
+      loadSessions()
+    }
   }
 
   async function chooseImageMode(file: File, mode: 'image' | 'content') {

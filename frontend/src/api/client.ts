@@ -88,24 +88,8 @@ export function mediaUrl(nodeId: string): string {
   return `/v1/media/${nodeId}`
 }
 
-/** 流式对话：逐步骤回调。 */
-export async function chatStream(
-  question: string,
-  sessionId: string,
-  onStep: (event: string, data: any) => void,
-  opts: { kbIds?: string[]; signal?: AbortSignal } = {},
-): Promise<void> {
-  const res = await fetch('/v1/chat', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
-    body: JSON.stringify({
-      question, session_id: sessionId, stream: true,
-      kb_ids: opts.kbIds || [],
-    }),
-    signal: opts.signal,
-  })
+async function consumeSSE(res: Response, onStep: (event: string, data: any) => void): Promise<void> {
   if (!res.ok || !res.body) return parseError(res)
-
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
   let buffer = ''
@@ -131,4 +115,44 @@ export async function chatStream(
       }
     }
   }
+}
+
+/** 流式对话：逐步骤回调。 */
+export async function chatStream(
+  question: string,
+  sessionId: string,
+  onStep: (event: string, data: any) => void,
+  opts: { kbIds?: string[]; signal?: AbortSignal } = {},
+): Promise<void> {
+  const res = await fetch('/v1/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
+    body: JSON.stringify({
+      question, session_id: sessionId, stream: true,
+      kb_ids: opts.kbIds || [],
+    }),
+    signal: opts.signal,
+  })
+  return consumeSSE(res, onStep)
+}
+
+/** 图片问答：上传图片 + 问题 → SSE 流式回答（结合 OCR 与检索内容）。 */
+export async function chatImageStream(
+  file: File,
+  question: string,
+  sessionId: string,
+  onStep: (event: string, data: any) => void,
+  opts: { kbIds?: string[] } = {},
+): Promise<void> {
+  const form = new FormData()
+  form.append('file', file)
+  form.append('question', question)
+  form.append('session_id', sessionId)
+  form.append('kb_ids', (opts.kbIds || []).join(','))
+  const res = await fetch('/v1/chat/image', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${getToken()}` },
+    body: form,
+  })
+  return consumeSSE(res, onStep)
 }
