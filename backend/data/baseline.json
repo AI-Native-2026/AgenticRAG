@@ -1,0 +1,57 @@
+{
+  "count": 10,
+  "hit_rate": 1,
+  "mrr": 1,
+  "details": [
+    {
+      "query": "iPhone 17 有几个存储版本，各卖多少钱？",
+      "hit": true,
+      "rank": 1
+    },
+    {
+      "query": "iPhone 17 的电池容量多大？支持多少瓦快充？",
+      "hit": true,
+      "rank": 1
+    },
+    {
+      "query": "Tesla Model 3 长续航版的续航和百公里加速是多少？",
+      "hit": true,
+      "rank": 1
+    },
+    {
+      "query": "Model 3 后驱版和长续航版的价格分别是多少？差价多少？",
+      "hit": true,
+      "rank": 1
+    },
+    {
+      "query": "ChromaDB 用什么机制保证写入不丢失？",
+      "hit": true,
+      "rank": 1
+    },
+    {
+      "query": "调用 LLM API 遇到 429 应该怎么处理？",
+      "hit": true,
+      "rank": 1
+    },
+    {
+      "query": "2026 年三季度北向资金净流入多少亿元？",
+      "hit": true,
+      "rank": 1
+    },
+    {
+      "query": "稳健成长混合基金的基金管理费是多少？",
+      "hit": true,
+      "rank": 1
+    },
+    {
+      "query": "个人投资中单只股票仓位建议不超过多少？",
+      "hit": true,
+      "rank": 1
+    },
+    {
+      "query": "基金 001234 过去一年净值增长率是多少？",
+      "hit": true,
+      "rank": 1
+    }
+  ]
+}
