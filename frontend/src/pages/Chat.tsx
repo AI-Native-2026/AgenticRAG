@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { Plus, Send, Trash2 } from 'lucide-react'
-import { api, chatStream } from '@/api/client'
+import { Plus, Send, Trash2, Image as ImageIcon } from 'lucide-react'
+import { api, chatStream, searchByImage } from '@/api/client'
 import { toast } from '@/store/toast'
 import MarkdownView from '@/components/MarkdownView'
 import KnowledgeScope from '@/components/KnowledgeScope'
@@ -8,7 +8,16 @@ import AuthImage from '@/components/AuthImage'
 
 interface ToolStep { tool: string; ok?: boolean; duration_ms?: number; detail?: string }
 interface Source { node_id: string; doc_name: string; modality?: string; page?: number | string; score?: number }
-interface Message { role: 'user' | 'bot'; content: string; steps: ToolStep[]; sources?: Source[]; streaming?: boolean }
+interface ImageHit { node_id: string; doc_name: string; modality?: string; vector_score?: number }
+interface Message {
+  role: 'user' | 'bot'
+  content: string
+  steps: ToolStep[]
+  sources?: Source[]
+  image?: string
+  imageResults?: ImageHit[]
+  streaming?: boolean
+}
 interface SessionMeta { session_id: string; title: string; last: number; messages: number }
 
 const SESSION_KEY = 'kr_session'
@@ -27,11 +36,16 @@ export default function Chat() {
   const [sessions, setSessions] = useState<SessionMeta[]>([])
   const [kbs, setKbs] = useState<any[]>([])
   const [selectedKbs, setSelectedKbs] = useState<string[]>([])
+  const [imgBusy, setImgBusy] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
+  const imgRef = useRef<HTMLInputElement>(null)
 
   function scrollDown() {
     requestAnimationFrame(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight })
   }
+
+  const updateBot = (fn: (msg: Message) => Message) =>
+    setMessages((m) => m.map((msg, i) => (i === m.length - 1 ? fn(msg) : msg)))
 
   function persist(id: string) {
     localStorage.setItem(SESSION_KEY, id)
@@ -98,9 +112,6 @@ export default function Chat() {
     setMessages((m) => [...m, { role: 'user', content: q, steps: [] }, { role: 'bot', content: '', steps: [], streaming: true }])
     scrollDown()
 
-    const updateBot = (fn: (msg: Message) => Message) =>
-      setMessages((m) => m.map((msg, i) => (i === m.length - 1 ? fn(msg) : msg)))
-
     try {
       await chatStream(q, sessionId, (event, data) => {
         if (event === 'token') {
@@ -136,6 +147,32 @@ export default function Chat() {
     }
   }
 
+  async function onPickImage(file?: File) {
+    if (!file) return
+    const url = URL.createObjectURL(file)
+    setMessages((m) => [...m,
+      { role: 'user', content: '', steps: [], image: url },
+      { role: 'bot', content: '', steps: [], streaming: true }])
+    scrollDown()
+    setImgBusy(true)
+    try {
+      const r = await searchByImage(file, 6)
+      const hits: ImageHit[] = r.results || []
+      updateBot((msg) => ({
+        ...msg,
+        streaming: false,
+        content: hits.length ? `为你找到 ${hits.length} 张相似图片：` : '未找到相似图片。',
+        imageResults: hits,
+      }))
+    } catch (e: any) {
+      updateBot((msg) => ({ ...msg, streaming: false, content: `以图搜图失败：${e.message}` }))
+      toast.err(e.message)
+    } finally {
+      setImgBusy(false)
+      scrollDown()
+    }
+  }
+
   return (
     <>
       <div className="page-head">
@@ -152,11 +189,27 @@ export default function Chat() {
                 <div>
                   <div className={`bub ${m.role === 'bot' ? 'md' : ''}`}>
                     {m.role === 'user'
-                      ? m.content
+                      ? (m.image
+                        ? <img src={m.image} alt="查询图" style={{ maxWidth: 220, maxHeight: 160, borderRadius: 8, display: 'block' }} />
+                        : m.content)
                       : m.content
                         ? <MarkdownView content={m.content} />
                         : (m.streaming ? <span className="typing"><span /><span /><span /></span> : '')}
                   </div>
+                  {m.role === 'bot' && m.imageResults && m.imageResults.length > 0 && (
+                    <div className="img-grid">
+                      {m.imageResults.map((h) => (
+                        <div className="img-card" key={h.node_id}>
+                          <AuthImage nodeId={h.node_id} alt={h.doc_name}
+                            style={{ width: '100%', height: 120, objectFit: 'cover', borderRadius: 8 }} />
+                          <div className="img-meta">
+                            <span>{h.doc_name}</span>
+                            {h.vector_score != null && <span className="score">{(h.vector_score * 100).toFixed(1)}%</span>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   {m.role === 'bot' && m.sources && m.sources.length > 0 && (
                     <div className="cites">
                       {m.sources.map((s) => (
@@ -183,7 +236,13 @@ export default function Chat() {
           </div>
 
           <div className="chat-input">
-            <textarea className="input" value={input} placeholder="输入问题，Enter 发送 / Shift+Enter 换行"
+            <input ref={imgRef} type="file" accept="image/*" style={{ display: 'none' }}
+              onChange={(e) => { onPickImage(e.target.files?.[0]); e.currentTarget.value = '' }} />
+            <button className="btn btn-o" title="上传图片以图搜图" aria-label="上传图片以图搜图"
+              onClick={() => imgRef.current?.click()} disabled={busy || imgBusy} data-testid="chat-image">
+              <ImageIcon size={16} />
+            </button>
+            <textarea className="input" value={input} placeholder="输入问题，Enter 发送 / Shift+Enter 换行；点左侧图片按钮以图搜图"
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }} />
             <button className="btn btn-p" onClick={send} disabled={busy} data-testid="chat-send"><Send size={15} /> 发送</button>
