@@ -1,0 +1,10 @@
+{"query": "iPhone 17 有几个存储版本，各卖多少钱？", "golden_docs": ["apple_iphone_17.md"], "golden_keywords": ["5999", "6999", "8999"]}
+{"query": "iPhone 17 的电池容量多大？支持多少瓦快充？", "golden_docs": ["apple_iphone_17.md"], "golden_keywords": ["4800", "45W"]}
+{"query": "Tesla Model 3 长续航版的续航和百公里加速是多少？", "golden_docs": ["tesla_model3_2026.md"], "golden_keywords": ["713", "4.2"]}
+{"query": "Model 3 后驱版和长续航版的价格分别是多少？差价多少？", "golden_docs": ["tesla_model3_2026.md"], "golden_keywords": ["26.99", "31.99"]}
+{"query": "ChromaDB 用什么机制保证写入不丢失？", "golden_docs": ["chroma_db_usage_guide.md"], "golden_keywords": ["WAL"]}
+{"query": "调用 LLM API 遇到 429 应该怎么处理？", "golden_docs": ["llm_api_docs.md"], "golden_keywords": ["退避", "重试"]}
+{"query": "2026 年三季度北向资金净流入多少亿元？", "golden_docs": ["market_report_2026_q3.md"], "golden_keywords": ["1800"]}
+{"query": "稳健成长混合基金的基金管理费是多少？", "golden_docs": ["fund_introduction.md"], "golden_keywords": ["1.2%"]}
+{"query": "个人投资中单只股票仓位建议不超过多少？", "golden_docs": ["risk_management.md"], "golden_keywords": ["10%"]}
+{"query": "基金 001234 过去一年净值增长率是多少？", "golden_docs": ["fund_introduction.md"], "golden_keywords": ["15.3%"]}

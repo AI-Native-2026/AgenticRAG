@@ -1,0 +1,14 @@
+# v2 新增依赖（在 v1 requirements.txt 基础上追加）
+# pip install -r requirements-v2.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+
+# API 服务层
+fastapi==0.128.0
+uvicorn==0.40.0
+PyJWT==2.9.0
+
+# 消息队列客户端（纯 Python，免 C 编译）
+kafka-python==3.0.11
+
+# 测试
+pytest==8.3.5
+requests==2.34.2

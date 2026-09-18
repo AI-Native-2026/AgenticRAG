@@ -1,0 +1,34 @@
+[
+  {
+    "name": "generate_too_slow",
+    "metric": "latency_p95.generate",
+    "op": "gt",
+    "threshold": 15000,
+    "window_hours": 24,
+    "message": "生成 p95 延迟超过 15 秒，检查 LLM API / 网络 / 熔断状态"
+  },
+  {
+    "name": "rerank_too_slow",
+    "metric": "latency_p95.rerank",
+    "op": "gt",
+    "threshold": 2000,
+    "window_hours": 24,
+    "message": "重排 p95 延迟超过 2 秒，检查 GPU 负载或候选数过大"
+  },
+  {
+    "name": "semantic_cache_hit_rate_low",
+    "metric": "semantic_cache_hit_rate",
+    "op": "lt",
+    "threshold": 0.1,
+    "window_hours": 24,
+    "message": "语义缓存命中率低于 10%，成本可能偏高，检查缓存策略"
+  },
+  {
+    "name": "too_many_quota_denied",
+    "metric": "quota_denied_count",
+    "op": "gt",
+    "threshold": 20,
+    "window_hours": 24,
+    "message": "配额拒绝次数过多，可能有租户超预算，联系管理员"
+  }
+]

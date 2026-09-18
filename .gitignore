@@ -1,0 +1,35 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ---- 环境 / 密钥 ----
+.env
+*.env
+!*.env.example
+
+# ---- 运行时数据 ----
+.data/
+logs/
+*.log
+data/sample_docs/
+data/uploads/
+data/chroma/
+chroma/
+
+# ---- Node / 前端 ----
+node_modules/
+dist/
+.vite/
+*.local
+
+# ---- IDE / OS ----
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
