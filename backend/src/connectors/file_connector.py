@@ -21,6 +21,7 @@ from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from src.connectors.base import BaseConnector, RawDocument, ResourceMeta, register
 from src.connectors.media import IMAGE_SUFFIXES, extract_image, extract_office, extract_pdf
+from src.config import get_env
 
 SUPPORTED_TEXT = {".md", ".markdown", ".txt", ".text", ".log", ".yaml", ".yml"}
 SUPPORTED_HTML = {".html", ".htm"}
