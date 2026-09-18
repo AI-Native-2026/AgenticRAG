@@ -29,17 +29,19 @@ class BM25Retriever:
         self.b = b
         self.documents: List[str] = []
         self.doc_ids: List[str] = []
+        self.node_map: Dict[str, Dict] = {}
         self.bm25: Optional[BM25Okapi] = None
 
     def build(self, nodes: List[Dict]) -> None:
         """用节点列表构建 BM25 索引（每次启动重建即可，量级小）。"""
         self.documents = [n["text"] for n in nodes]
         self.doc_ids = [n["node_id"] for n in nodes]
+        self.node_map = {n["node_id"]: n for n in nodes}
         tokenized = [jieba_tokenize(d) for d in self.documents]
         self.bm25 = BM25Okapi(tokenized, k1=self.k1, b=self.b)
 
     def search(self, query: str, top_k: int = 10) -> List[Dict]:
-        """检索，返回按得分降序的 [{node_id, score}]。"""
+        """检索，返回按得分降序的 [{node_id, score, text, metadata}]。"""
         if self.bm25 is None:
             return []
         query_tokens = jieba_tokenize(query)
@@ -49,7 +51,14 @@ class BM25Retriever:
             key=lambda i: scores[i],
             reverse=True,
         )[:top_k]
-        return [{"node_id": self.doc_ids[i], "score": float(scores[i])} for i in ranked]
+        out = []
+        for i in ranked:
+            nid = self.doc_ids[i]
+            node = self.node_map.get(nid, {})
+            out.append({"node_id": nid, "score": float(scores[i]),
+                        "text": node.get("text", ""),
+                        "metadata": node.get("metadata", {})})
+        return out
 
 
 if __name__ == "__main__":

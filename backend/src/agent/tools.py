@@ -46,6 +46,8 @@ class RequestContext:
         self._rid = contextvars.ContextVar("ctx_rid", default="unknown")
         self._tenant = contextvars.ContextVar("ctx_tenant", default=None)
         self._emit = contextvars.ContextVar("ctx_emit", default=None)
+        self._datasources = contextvars.ContextVar("ctx_datasources", default=None)
+        self._kbs = contextvars.ContextVar("ctx_kbs", default=None)
 
     @property
     def role(self):
@@ -63,15 +65,27 @@ class RequestContext:
     def emit(self):
         return self._emit.get()
 
+    @property
+    def datasource_ids(self):
+        return self._datasources.get()
+
+    @property
+    def kb_ids(self):
+        return self._kbs.get()
+
 
 _CTX = RequestContext()
 
 
-def set_ctx(role: str, request_id: str, tenant: Optional[str] = None, emit=None) -> None:
+def set_ctx(role: str, request_id: str, tenant: Optional[str] = None, emit=None,
+            datasource_ids: Optional[List[str]] = None,
+            kb_ids: Optional[List[str]] = None) -> None:
     _CTX._role.set(role)
     _CTX._rid.set(request_id)
     _CTX._tenant.set(tenant)
     _CTX._emit.set(emit)
+    _CTX._datasources.set(datasource_ids)
+    _CTX._kbs.set(kb_ids)
 
 
 def clear_ctx() -> None:
@@ -79,6 +93,8 @@ def clear_ctx() -> None:
     _CTX._rid.set("unknown")
     _CTX._tenant.set(None)
     _CTX._emit.set(None)
+    _CTX._datasources.set(None)
+    _CTX._kbs.set(None)
 
 
 def emit_step(event_type: str, **data) -> None:
@@ -135,11 +151,20 @@ class RAGTools:
         where: Dict[str, Any] = {}
         if tenant:
             where["tenant"] = tenant
-        if kb_id:
-            kb = self._get_kb(kb_id)
-            if kb and kb.get("datasource_ids"):
-                # Chroma 不支持 IN 列表时退化为按数据源逐个召回（此处用 $in）
-                where["datasource_id"] = {"$in": kb["datasource_ids"]}
+        # 检索范围：用户在对话中选择的知识库（多个取并集）；为空表示全部
+        ds_scope = _CTX.datasource_ids
+        kb_ids = list(_CTX.kb_ids or [])
+        if kb_id and kb_id not in kb_ids:
+            kb_ids.append(kb_id)
+        if kb_ids:
+            union = set()
+            for kid in kb_ids:
+                kbd = self._get_kb(kid)
+                if kbd:
+                    union.update(kbd.get("datasource_ids", []))
+            ds_scope = list(union)
+        if ds_scope:
+            where["datasource_id"] = {"$in": list(ds_scope)}
         where = where or None
 
         t0 = time.time()

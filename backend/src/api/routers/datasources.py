@@ -85,7 +85,7 @@ def delete_datasource(request: Request, ds_id: str):
     svc.schema_store.clear(ds_id)
     svc.sync_state.col.delete_many({"datasource_id": ds_id})
     svc.datasource_store.delete(ds_id)
-    svc.rebuild_bm25()
+    svc.mark_bm25_dirty()
     return {"deleted": True, "ds_id": ds_id}
 
 
@@ -187,20 +187,30 @@ def schema(request: Request, ds_id: str):
 
 
 @router.get("/{ds_id}/preview")
-def preview(request: Request, ds_id: str, resource: Optional[str] = None, limit: int = 10):
-    """轻量预览：限制条数与单条字符数，避免大文件占用资源。"""
+def preview(request: Request, ds_id: str, resource: Optional[str] = None, limit: int = 10,
+            mask: bool = True):
+    """轻量预览：限制条数与单条字符数，避免大文件占用资源；默认脱敏。"""
     user = get_bearer(request)
     svc = request.app.state.svc
     raw = svc.datasource_store.get_raw(ds_id)
     _owned(svc, ds_id, user)
     env = svc.env
     limit = max(1, min(limit, 50))
+    mask_on = mask and bool(env.get("PII_MASK_ENABLED", True))
     conn = svc.sync_service.build_connector(raw)
     try:
         docs = conn.preview(resource=resource, limit=limit,
                             max_chars=int(env.get("PREVIEW_MAX_CHARS", 2000)))
-        return {"preview": [{"ref": d.ref, "title": d.title, "text": d.text,
-                             "metadata": d.metadata} for d in docs]}
+        out = []
+        for d in docs:
+            text = d.text
+            meta = d.metadata
+            if mask_on:
+                from src.connectors.masking import mask_any, mask_text
+                text = mask_text(text, env.get("PII_MASK_EXTRA"))
+                meta = mask_any(meta, env.get("PII_MASK_EXTRA"))
+            out.append({"ref": d.ref, "title": d.title, "text": text, "metadata": meta})
+        return {"preview": out, "masked": mask_on}
     finally:
         conn.close()
 
@@ -213,7 +223,7 @@ def _run_sync(svc, ds_id: str, mode: str, limit: Optional[int], job_id: Optional
     except Exception:  # noqa: BLE001
         svc.datasource_store.set_status(ds_id, "error")
     finally:
-        svc.rebuild_bm25()
+        svc.mark_bm25_dirty()
 
 
 @router.post("/{ds_id}/sync")

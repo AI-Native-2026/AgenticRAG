@@ -73,13 +73,16 @@ export async function chatStream(
   question: string,
   sessionId: string,
   onStep: (event: string, data: any) => void,
-  signal?: AbortSignal,
+  opts: { kbIds?: string[]; signal?: AbortSignal } = {},
 ): Promise<void> {
   const res = await fetch('/v1/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
-    body: JSON.stringify({ question, session_id: sessionId, stream: true }),
-    signal,
+    body: JSON.stringify({
+      question, session_id: sessionId, stream: true,
+      kb_ids: opts.kbIds || [],
+    }),
+    signal: opts.signal,
   })
   if (!res.ok || !res.body) return parseError(res)
 

@@ -195,6 +195,23 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
 .bub { padding: 11px 14px; border-radius: 14px; font-size: 13.5px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
 .msg.bot .bub { background: var(--panel); border: 1px solid var(--border); border-top-left-radius: 4px; }
 .msg.user .bub { background: var(--accent); color: #fff; border-top-right-radius: 4px; }
+/* Markdown 渲染 */
+.bub.md { white-space: normal; }
+.bub.md > :first-child { margin-top: 0; }
+.bub.md > :last-child { margin-bottom: 0; }
+.bub.md h1, .bub.md h2, .bub.md h3, .bub.md h4 { font-size: 14.5px; font-weight: 700; margin: 12px 0 6px; }
+.bub.md p { margin: 6px 0; }
+.bub.md ul, .bub.md ol { margin: 6px 0 6px 20px; }
+.bub.md li { margin: 2px 0; }
+.bub.md code { background: var(--chip-bg); padding: 1px 5px; border-radius: 5px; font-size: 12px; }
+.bub.md pre { background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; padding: 10px; overflow-x: auto; margin: 8px 0; }
+.bub.md pre code { background: none; padding: 0; }
+.bub.md table { border-collapse: collapse; width: 100%; margin: 8px 0; font-size: 12.5px; }
+.bub.md th, .bub.md td { border: 1px solid var(--border); padding: 6px 9px; text-align: left; }
+.bub.md th { background: var(--chip-bg); }
+.bub.md blockquote { border-left: 3px solid var(--accent); padding-left: 10px; color: var(--text-2); margin: 8px 0; }
+.bub.md a { color: var(--accent); text-decoration: underline; }
+.bub.md hr { border: none; border-top: 1px solid var(--border); margin: 10px 0; }
 .tool-call { margin-top: 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel-2); overflow: hidden; font-size: 12px; }
 .tool-call .tc-head { display: flex; align-items: center; gap: 8px; padding: 8px 11px; font-weight: 600; color: var(--text-2); }
 .tool-call pre { margin: 0; padding: 9px 11px; border-top: 1px solid var(--border); font-size: 11.5px; color: var(--text-2); overflow-x: auto; white-space: pre-wrap; }

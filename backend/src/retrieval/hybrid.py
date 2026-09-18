@@ -43,10 +43,28 @@ class HybridRetriever:
         self.embed_model = embed_model
         self.vector_store = vector_store
         self.bm25 = bm25_retriever or BM25Retriever()
+        self._dirty = False
+        self._node_provider = None
+
+    # ---------- 增量/惰性 BM25 维护 ----------
+
+    def set_node_provider(self, fn) -> None:
+        """注入"取全量节点"的回调，用于惰性重建。"""
+        self._node_provider = fn
+
+    def mark_dirty(self) -> None:
+        """标记索引已过期；下次检索时再重建（避免批量写入时反复重建）。"""
+        self._dirty = True
+
+    def ensure_fresh(self) -> None:
+        if self._dirty and self._node_provider is not None:
+            self.build_bm25(self._node_provider())
+            self._dirty = False
 
     def build_bm25(self, nodes: List[Dict]) -> None:
         """用 docstore 全量节点构建 BM25 索引。"""
         self.bm25.build(nodes)
+        self._dirty = False
         logger.info("BM25 索引构建完成：%d 节点", len(nodes))
 
     def retrieve(
@@ -61,30 +79,38 @@ class HybridRetriever:
 
         final_top_k 是融合后的候选数，之后交给重排精排。
         """
-        # 1) 向量召回（GPU 查询 embedding 在全局锁下执行，单写者）
-        q_emb = ModelExecutor.embed(self.embed_model, [query])[0]
-        vec_hits = self.vector_store.query(q_emb, top_k=top_k_v, where=where)
-        logger.debug("向量召回 %d 条", len(vec_hits))
+        self.ensure_fresh()
 
-        # 2) BM25 召回
-        bm_hits = self.bm25.search(query, top_k=top_k_b)
-        logger.debug("BM25 召回 %d 条", len(bm_hits))
+        # 1) 向量召回 + 2) BM25 召回 并行执行（GPU 与 CPU 互不阻塞）
+        from concurrent.futures import ThreadPoolExecutor
+
+        def _vector_recall():
+            q_emb = ModelExecutor.embed(self.embed_model, [query])[0]
+            return self.vector_store.query(q_emb, top_k=top_k_v, where=where)
+
+        with ThreadPoolExecutor(max_workers=2) as ex:
+            f_vec = ex.submit(_vector_recall)
+            f_bm = ex.submit(self.bm25.search, query, top_k_b)
+            vec_hits = f_vec.result()
+            bm_hits = f_bm.result()
+        logger.debug("召回：向量 %d / BM25 %d", len(vec_hits), len(bm_hits))
 
         # 3) RRF 融合
         rrf: Dict[str, Dict] = {}
         for rank, hit in enumerate(vec_hits):
-            rrf.setdefault(hit["node_id"], {**hit, "bm25_score": 0.0}).setdefault("rrf_score", 0.0)
-            rrf[hit["node_id"]]["vector_score"] = hit["score"]
-            rrf[hit["node_id"]]["rrf_score"] += 1.0 / (RRF_K + rank)
+            entry = rrf.setdefault(hit["node_id"], {**hit, "bm25_score": 0.0, "rrf_score": 0.0})
+            entry["vector_score"] = hit["score"]
+            entry["rrf_score"] += 1.0 / (RRF_K + rank)
 
         for rank, hit in enumerate(bm_hits):
             if hit["node_id"] not in rrf:
                 rrf[hit["node_id"]] = {
                     "node_id": hit["node_id"],
-                    "text": "",
-                    "metadata": {},
+                    "text": hit.get("text", ""),
+                    "metadata": hit.get("metadata", {}),
                     "vector_score": 0.0,
                     "bm25_score": hit["score"],
+                    "rrf_score": 0.0,
                 }
             rrf[hit["node_id"]]["bm25_score"] = hit["score"]
             rrf[hit["node_id"]]["rrf_score"] = rrf[hit["node_id"]].get("rrf_score", 0.0) + 1.0 / (RRF_K + rank)

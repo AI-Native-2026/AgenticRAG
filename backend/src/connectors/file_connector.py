@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from src.connectors.base import BaseConnector, RawDocument, ResourceMeta, register
+from src.connectors.media import IMAGE_SUFFIXES, extract_image, extract_office, extract_pdf
 
 SUPPORTED_TEXT = {".md", ".markdown", ".txt", ".text", ".log", ".yaml", ".yml"}
 SUPPORTED_HTML = {".html", ".htm"}
@@ -27,7 +28,9 @@ SUPPORTED_TABULAR = {".csv", ".tsv"}
 SUPPORTED_EXCEL = {".xlsx", ".xls"}
 SUPPORTED_JSON = {".json", ".jsonl", ".ndjson"}
 SUPPORTED_DOC = {".pdf", ".docx", ".pptx"}
-SUPPORTED = SUPPORTED_TEXT | SUPPORTED_HTML | SUPPORTED_TABULAR | SUPPORTED_EXCEL | SUPPORTED_JSON | SUPPORTED_DOC
+SUPPORTED_IMAGE = set(IMAGE_SUFFIXES)
+SUPPORTED = (SUPPORTED_TEXT | SUPPORTED_HTML | SUPPORTED_TABULAR | SUPPORTED_EXCEL
+             | SUPPORTED_JSON | SUPPORTED_DOC | SUPPORTED_IMAGE)
 
 
 class _TextExtractor(HTMLParser):
@@ -148,9 +151,17 @@ class FileConnector(BaseConnector):
             return "\n".join(lines)[:max_chars]
         if suffix in SUPPORTED_DOC:
             try:
-                return next(iter(self._read_document(p, self._base_meta(p)))).text[:max_chars]
+                parts = (extract_pdf(p, self._media_config(), max_pages=1)
+                         if suffix == ".pdf" else extract_office(p))
+                return (parts[0][1] if parts else "")[:max_chars]
             except Exception:  # noqa: BLE001
                 return "(无法预览该文件)"
+        if suffix in SUPPORTED_IMAGE:
+            try:
+                text, _ = extract_image(p, self._media_config())
+                return text[:max_chars]
+            except Exception:  # noqa: BLE001
+                return "(无法预览该图片)"
         return ""
 
     def describe(self, resource: str) -> Any:
@@ -205,15 +216,18 @@ class FileConnector(BaseConnector):
     def _read_file(self, p: Path) -> Iterator[RawDocument]:
         suffix = p.suffix.lower()
         meta = self._base_meta(p)
-        if suffix in SUPPORTED_TEXT:
+        if suffix in SUPPORTED_IMAGE:
+            yield from self._read_image(p, meta)
+        elif suffix in SUPPORTED_TEXT:
             text = p.read_text(encoding="utf-8", errors="replace")
-            yield RawDocument(ref=str(p), text=text, title=p.stem, metadata={**meta, "page": 1})
+            yield RawDocument(ref=str(p), text=text, title=p.stem,
+                              metadata={**meta, "page": 1, "modality": "text"})
         elif suffix in SUPPORTED_HTML:
             raw = p.read_text(encoding="utf-8", errors="replace")
             ex = _TextExtractor()
             ex.feed(raw)
             yield RawDocument(ref=str(p), text=ex.text(), title=ex.title or p.stem,
-                              metadata={**meta, "page": 1})
+                              metadata={**meta, "page": 1, "modality": "text"})
         elif suffix in SUPPORTED_TABULAR:
             yield from self._read_csv(p, meta)
         elif suffix in SUPPORTED_EXCEL:
@@ -224,7 +238,21 @@ class FileConnector(BaseConnector):
             yield from self._read_document(p, meta)
         else:
             yield RawDocument(ref=str(p), text=p.read_text(encoding="utf-8", errors="replace"),
-                              title=p.stem, metadata={**meta, "page": 1})
+                              title=p.stem, metadata={**meta, "page": 1, "modality": "text"})
+
+    def _media_config(self) -> Dict[str, Any]:
+        env = get_env()
+        return {
+            "ocr": bool(env.get("IMAGE_OCR_ENABLED", True)),
+            "tesseract_lang": env.get("TESSERACT_LANG", "chi_sim+eng"),
+            "vlm": bool(env.get("IMAGE_VLM_ENABLED", False)),
+            "vlm_model_path": env.get("VLM_MODEL_PATH"),
+            "pdf_ocr": bool(env.get("PDF_OCR_ENABLED", False)),
+        }
+
+    def _read_image(self, p: Path, meta: Dict[str, Any]) -> Iterator[RawDocument]:
+        text, extra = extract_image(p, self._media_config())
+        yield RawDocument(ref=str(p), text=text, title=p.name, metadata={**meta, **extra})
 
     def _read_csv(self, p: Path, meta: Dict[str, Any]) -> Iterator[RawDocument]:
         delim = "\t" if p.suffix.lower() == ".tsv" else ","
@@ -277,22 +305,17 @@ class FileConnector(BaseConnector):
             yield RawDocument(ref=str(p), text=str(data), title=p.stem, metadata={**meta, "page": 1})
 
     def _read_document(self, p: Path, meta: Dict[str, Any]) -> Iterator[RawDocument]:
-        """PDF / DOCX / PPTX：交给 llama-index readers。"""
-        try:
-            from llama_index.core import SimpleDirectoryReader
-        except ImportError as e:  # noqa: BLE001
-            raise RuntimeError("解析 PDF/DOCX/PPTX 需要 llama-index-readers-file") from e
-        reader = SimpleDirectoryReader(input_files=[str(p)])
-        docs = reader.load_data()
-        for i, d in enumerate(docs):
-            page = d.metadata.get("page_label") or d.metadata.get("page") or i + 1
-            yield RawDocument(ref=f"{p}#{i}", text=d.text, title=p.stem,
-                              metadata={**meta, "page": page, "part": i})
+        """PDF / DOCX / PPTX：按页/段抽取正文与表格，标注 modality=document。"""
+        suffix = p.suffix.lower()
+        parts = extract_pdf(p, self._media_config()) if suffix == ".pdf" else extract_office(p)
+        for page, text, extra in parts:
+            yield RawDocument(ref=f"{p}#{page}", text=text, title=p.stem,
+                              metadata={**meta, **extra, "page": page})
 
     def _row_doc(self, p: Path, meta: Dict[str, Any], idx: int, rec: Dict[str, Any],
                  sheet: Optional[str]) -> RawDocument:
         text = "\n".join(f"{k}: {v}" for k, v in rec.items() if str(v).strip() != "")
-        md = {**meta, "row_id": idx, "page": 1}
+        md = {**meta, "row_id": idx, "page": 1, "modality": "table"}
         if sheet:
             md["sheet"] = sheet
         return RawDocument(ref=f"{p}#{sheet or ''}#{idx}", text=text, title=f"{p.stem} #{idx}",

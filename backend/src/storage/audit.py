@@ -18,6 +18,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # 允许直接 python src/xx.py 运行
 
 from src.config import get_env
+from src.storage.mongo import get_client
 
 
 class AuditLog:
@@ -25,7 +26,7 @@ class AuditLog:
         env = get_env()
         import pymongo
 
-        self.client = pymongo.MongoClient(uri or env["MONGO_URI"], serverSelectionTimeoutMS=5000)
+        self.client = get_client(uri or env["MONGO_URI"])
         self.db = self.client[db_name or env["MONGO_DB"]]
         self.col = self.db["audit"]
         # 审计查询最常用的三个维度：时间 / 用户(request_id/role) / 工具

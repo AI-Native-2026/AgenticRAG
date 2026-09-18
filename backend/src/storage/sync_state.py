@@ -14,6 +14,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from src.config import get_env
+from src.storage.mongo import get_client
 
 
 class SyncStateStore:
@@ -21,7 +22,7 @@ class SyncStateStore:
         env = get_env()
         import pymongo
 
-        self.client = pymongo.MongoClient(uri or env["MONGO_URI"], serverSelectionTimeoutMS=5000)
+        self.client = get_client(uri or env["MONGO_URI"])
         self.db = self.client[db_name or env["MONGO_DB"]]
         self.col = self.db["db_sync_state"]
         self.col.create_index("datasource_id")

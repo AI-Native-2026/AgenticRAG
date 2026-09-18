@@ -20,6 +20,8 @@ class ChatRequest(BaseModel):
     question: str = Field(..., min_length=1, description="用户问题")
     session_id: str = Field(default="default", description="会话 id，同 id 共享多轮记忆")
     stream: bool = Field(default=True, description="是否流式返回")
+    kb_ids: List[str] = Field(default_factory=list, description="检索范围：选中的知识库 id（空=全部）")
+    datasource_ids: List[str] = Field(default_factory=list, description="可选：直接限定数据源")
 
 
 class ChatResponse(BaseModel):

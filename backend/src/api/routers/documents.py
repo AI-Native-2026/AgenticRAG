@@ -37,7 +37,7 @@ def submit_docs(request: Request, body: DocSubmitRequest):
         }
         for d in body.docs
     ]
-    svc.rebuild_bm25()
+    svc.mark_bm25_dirty()
     from src.ingestion.producer import DocumentProducer
     n = DocumentProducer().publish_docs(docs, request_id=body.idempotency_key or "api")
     return DocSubmitResponse(accepted=n, request_id=body.idempotency_key or "api")
@@ -111,5 +111,5 @@ def delete_document(request: Request, ref_doc_id: str):
     svc.docstore.delete_by_ref_doc(ref_doc_id)
     svc.vector_store.delete_by_ref_doc(ref_doc_id)
     svc.cache.invalidate(ref_doc_id)
-    svc.rebuild_bm25()
+    svc.mark_bm25_dirty()
     return {"deleted": True, "ref_doc_id": ref_doc_id, "chunks": len(nodes)}

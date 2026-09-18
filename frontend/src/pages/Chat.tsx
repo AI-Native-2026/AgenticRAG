@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Plus, Send, Trash2 } from 'lucide-react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { api, chatStream } from '@/api/client'
 import { toast } from '@/store/toast'
 
@@ -15,13 +17,15 @@ function newSessionId() {
 
 export default function Chat() {
   const [messages, setMessages] = useState<Message[]>([
-    { role: 'bot', content: '你好，我是知识中台助手。可以帮你检索知识库，或查询已接入的数据库。', steps: [] },
+    { role: 'bot', content: '你好，我是 **小K**，你的知识中台助手。可以帮你检索知识库，或查询已接入的数据库。', steps: [] },
   ])
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
   const [sessionId, setSessionId] = useState<string>(() => localStorage.getItem(SESSION_KEY) || newSessionId())
   const [sessions, setSessions] = useState<SessionMeta[]>([])
   const [memory, setMemory] = useState<any>(null)
+  const [kbs, setKbs] = useState<any[]>([])
+  const [selectedKbs, setSelectedKbs] = useState<string[]>([])
   const scrollRef = useRef<HTMLDivElement>(null)
 
   function scrollDown() {
@@ -56,6 +60,8 @@ export default function Chat() {
   useEffect(() => {
     loadSessions()
     loadHistory(sessionId)
+    api.get<{ knowledge_bases: any[] }>('/v1/knowledge-bases')
+      .then((r) => setKbs(r.knowledge_bases)).catch(() => {})
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -120,7 +126,7 @@ export default function Chat() {
         } else if (event === 'error') {
           toast.err(data.message || '对话出错')
         }
-      })
+      }, { kbIds: selectedKbs })
     } catch (e: any) {
       toast.err(e.message)
     } finally {
@@ -145,8 +151,12 @@ export default function Chat() {
               <div key={i} className={`msg ${m.role}`}>
                 <div className="av">{m.role === 'user' ? 'A' : 'K'}</div>
                 <div>
-                  <div className="bub">
-                    {m.content || (m.streaming ? <span className="typing"><span /><span /><span /></span> : '')}
+                  <div className={`bub ${m.role === 'bot' ? 'md' : ''}`}>
+                    {m.role === 'user'
+                      ? m.content
+                      : m.content
+                        ? <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown>
+                        : (m.streaming ? <span className="typing"><span /><span /><span /></span> : '')}
                   </div>
                   {m.steps.map((s, j) => (
                     <div className="tool-call" key={j}>
@@ -182,6 +192,29 @@ export default function Chat() {
             </div>
           </div>
           <div className="card card-pad">
+            <div className="row" style={{ marginBottom: 9 }}>
+              <div style={{ fontWeight: 600 }}>检索范围（知识库）</div>
+              <span className="spacer" />
+              <button className="btn btn-g btn-xs" onClick={() => setSelectedKbs([])}>全部</button>
+            </div>
+            {kbs.length === 0 ? <span className="muted">暂无知识库</span> : (
+              <div style={{ display: 'grid', gap: 8 }}>
+                {kbs.map((k) => (
+                  <label key={k.kb_id} className="row" style={{ gap: 8 }}>
+                    <input type="checkbox" checked={selectedKbs.includes(k.kb_id)}
+                      onChange={(e) => setSelectedKbs(e.target.checked
+                        ? [...selectedKbs, k.kb_id]
+                        : selectedKbs.filter((x) => x !== k.kb_id))} />
+                    <span>{k.name}</span>
+                    <span className="spacer" />
+                    <span className="muted">{k.datasource_count ?? k.datasource_ids?.length ?? 0} 源</span>
+                  </label>
+                ))}
+              </div>
+            )}
+            <div className="muted mt">{selectedKbs.length === 0 ? '当前：全部知识库' : `已选 ${selectedKbs.length} 个知识库`}</div>
+          </div>
+          <div className="card card-pad">
             <div style={{ fontWeight: 600, marginBottom: 9 }}>记忆与上下文</div>
             {memory ? (
               <>
@@ -197,7 +230,6 @@ export default function Chat() {
                 )}
               </>
             ) : <span className="muted">加载中…</span>}
-            <div className="note mt">超出窗口的旧消息会自动压缩为长期摘要，最近若干轮保留原文。</div>
           </div>
         </aside>
       </div>

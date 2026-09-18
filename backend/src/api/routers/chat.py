@@ -35,7 +35,8 @@ async def chat(request: Request, body: ChatRequest):
 
     if not body.stream:
         from src.agent.tools import clear_ctx, set_ctx
-        set_ctx(role=user["role"], request_id=request_id, tenant=user["tenant"])
+        set_ctx(role=user["role"], request_id=request_id, tenant=user["tenant"],
+                kb_ids=body.kb_ids, datasource_ids=body.datasource_ids)
         try:
             result = await svc.rag.achat(agent, body.session_id, body.question, tenant=user["tenant"])
         finally:
@@ -48,6 +49,7 @@ async def chat(request: Request, body: ChatRequest):
             async for ev in svc.rag.achat_stream(
                 agent, body.session_id, body.question,
                 role=user["role"], tenant=user["tenant"], request_id=request_id,
+                kb_ids=body.kb_ids, datasource_ids=body.datasource_ids,
             ):
                 yield sse_event(ev["event"], ev["data"])
         except Exception as e:  # noqa: BLE001

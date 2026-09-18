@@ -51,6 +51,7 @@ class AppServices:
 
         self.hybrid = HybridRetriever(embed_model=self.embed_model, vector_store=self.vector_store)
         self._bm25_lock = threading.Lock()
+        self.hybrid.set_node_provider(self.docstore.get_all_nodes)
         self.rebuild_bm25()
 
         self.reranker = Reranker(backend=self.env.get("RERANK_BACKEND", "cross_encoder"))
@@ -73,9 +74,13 @@ class AppServices:
         )
 
     def rebuild_bm25(self) -> None:
-        """重建 BM25 索引（全量）。生产可换增量。"""
+        """立即重建 BM25 索引（全量）。"""
         with self._bm25_lock:
             self.hybrid.build_bm25(self.docstore.get_all_nodes())
+
+    def mark_bm25_dirty(self) -> None:
+        """标记 BM25 过期，下次检索时惰性重建（避免批量写入时反复重建）。"""
+        self.hybrid.mark_dirty()
 
     def stats(self) -> Dict[str, Any]:
         try:

@@ -111,6 +111,22 @@ def get_env() -> Dict[str, Any]:
     config["PREVIEW_PAGE_SIZE"] = int(_get("PREVIEW_PAGE_SIZE", "10"))           # 文件列表每页
     config["DISCOVER_MAX_FILES"] = int(_get("DISCOVER_MAX_FILES", "5000"))       # 目录扫描上限
 
+    # ---- 隐私合规（预览脱敏） ----
+    config["PII_MASK_ENABLED"] = _get("PII_MASK_ENABLED", "true").lower() == "true"
+    config["PII_MASK_EXTRA"] = [p for p in _get("PII_MASK_EXTRA", "").split("||") if p.strip()]
+
+    # ---- 多媒体 / 富文档 ----
+    config["IMAGE_OCR_ENABLED"] = _get("IMAGE_OCR_ENABLED", "true").lower() == "true"
+    config["TESSERACT_LANG"] = _get("TESSERACT_LANG", "chi_sim+eng")
+    config["IMAGE_VLM_ENABLED"] = _get("IMAGE_VLM_ENABLED", "false").lower() == "true"
+    config["VLM_MODEL_PATH"] = _get("VLM_MODEL_PATH", "/root/autodl-tmp/models/Qwen2.5-VL-3B-Instruct")
+    config["PDF_OCR_ENABLED"] = _get("PDF_OCR_ENABLED", "false").lower() == "true"
+
+    # ---- 多模态模型（可选） ----
+    config["VL_RERANKER_PATH"] = _get("VL_RERANKER_PATH", "/root/autodl-tmp/models/Qwen3-VL-Reranker-2B")
+    config["VL_EMBEDDING_PATH"] = _get("VL_EMBEDDING_PATH", "/root/autodl-tmp/models/Qwen3-VL-Embedding-8B")
+    config["VL_RERANK_MEDIA"] = _get("VL_RERANK_MEDIA", "false")
+
     # ---- 队列 ----
     config["KAFKA_BOOTSTRAP"] = _get("KAFKA_BOOTSTRAP", "localhost:9092")
     config["QUEUE_BACKEND"] = _get("QUEUE_BACKEND", "kafka")  # kafka | dev

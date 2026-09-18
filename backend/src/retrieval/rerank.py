@@ -26,41 +26,93 @@ logger = logging.getLogger(__name__)
 
 
 class Reranker:
-    """统一重排接口。backend = "cross_encoder" | "llm"。"""
+    """统一重排接口。backend = "cross_encoder" | "vl" | "llm" | "auto"。
+
+    - cross_encoder：本地 bge-reranker-base（默认，快）
+    - vl           ：多模态 Qwen3-VL-Reranker（统一重排文本/图片/表格内容）
+    - llm          ：DeepSeek 打分（对照）
+    - auto         ：优先 vl，加载失败回退 cross_encoder，再回退 llm
+    """
 
     def __init__(self, backend: str = "cross_encoder"):
-        self.backend = backend
         self.env = get_env()
         self._ce = None
-
-        if backend == "cross_encoder":
-            from sentence_transformers import CrossEncoder
-
-            logger.info("加载本地重排模型 %s ...", self.env["RERANKER_PATH"])
-            self._ce = CrossEncoder(self.env["RERANKER_PATH"], device=self.env["DEVICE"])
-        elif backend == "llm":
+        self.backend = self._resolve_backend(backend)
+        if self.backend in ("cross_encoder", "vl"):
+            self._load_ce()
+        elif self.backend == "llm":
             from src.llm.gateway import LLMGateway
             self.llm = LLMGateway().build_llm()
+
+    def _resolve_backend(self, backend: str) -> str:
+        if backend == "auto":
+            for b in ("vl", "cross_encoder"):
+                try:
+                    if b == "vl":
+                        self._try_load_vl()
+                    else:
+                        self._try_load_ce(self.env["RERANKER_PATH"])
+                    logger.info("auto 选择重排后端：%s", b)
+                    self.backend = b
+                    return b
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("重排后端 %s 加载失败，尝试下一个：%s", b, e)
+            logger.warning("多模态/交叉重排均不可用，回退 llm")
+            return "llm"
+        return backend
+
+    def _try_load_ce(self, path: str):
+        from sentence_transformers import CrossEncoder
+        logger.info("加载本地重排模型 %s ...", path)
+        self._ce = CrossEncoder(path, device=self.env["DEVICE"])
+
+    def _try_load_vl(self):
+        from sentence_transformers import CrossEncoder
+        path = self.env["VL_RERANKER_PATH"]
+        logger.info("加载多模态重排模型 %s ...", path)
+        try:
+            self._ce = CrossEncoder(path, device=self.env["DEVICE"], trust_remote_code=True)
+        except TypeError:
+            self._ce = CrossEncoder(path, device=self.env["DEVICE"])
+
+    def _load_ce(self):
+        if self.backend == "vl":
+            self._try_load_vl()
         else:
-            raise ValueError(f"未知 backend: {backend}")
+            self._try_load_ce(self.env["RERANKER_PATH"])
 
     def rerank(self, query: str, candidates: List[Dict], top_n: int = 5) -> List[Dict]:
         """对混合召回结果精排，返回 top_n 条（带新 score）。"""
-        if self.backend == "cross_encoder":
+        if self.backend in ("cross_encoder", "vl"):
             return self._rerank_cross_encoder(query, candidates, top_n)
         return self._rerank_llm(query, candidates, top_n)
 
-    # ---------- 后端 1：本地 CrossEncoder ----------
+    # ---------- 后端 1/2：CrossEncoder（文本 / 多模态） ----------
+
+    def _pairs(self, query: str, candidates: List[Dict]):
+        """构造 (query, doc) 对；vl 后端且开启时，图片类 chunk 传真实图片。"""
+        import os
+
+        use_media = self.backend == "vl" and str(self.env.get("VL_RERANK_MEDIA", "false")).lower() == "true"
+        pairs = []
+        for c in candidates:
+            media = (c.get("metadata") or {}).get("media_path")
+            if use_media and media and os.path.exists(media):
+                try:
+                    from PIL import Image
+                    pairs.append((query, Image.open(media).convert("RGB")))
+                    continue
+                except Exception:  # noqa: BLE001
+                    pass
+            pairs.append((query, c["text"]))
+        return pairs
 
     def _rerank_cross_encoder(self, query: str, candidates: List[Dict], top_n: int) -> List[Dict]:
-        pairs = [(query, c["text"]) for c in candidates]
-        scores = ModelExecutor.rerank(self._ce, pairs)  # GPU 单写者锁保护
-        ranked = sorted(
-            zip(candidates, scores),
-            key=lambda x: x[1],
-            reverse=True,
-        )[:top_n]
-        return [{**c, "rerank_score": float(s), "rerank_backend": "cross_encoder"} for c, s in ranked]
+        if not candidates:
+            return []
+        scores = ModelExecutor.rerank(self._ce, self._pairs(query, candidates))  # GPU 单写者锁保护
+        ranked = sorted(zip(candidates, scores), key=lambda x: x[1], reverse=True)[:top_n]
+        return [{**c, "rerank_score": float(s), "rerank_backend": self.backend} for c, s in ranked]
 
     # ---------- 后端 2：LLM 重排（教学对照） ----------
 

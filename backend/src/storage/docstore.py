@@ -30,6 +30,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # 允许直接 python src/xx.py 运行
 
 from src.config import get_env
+from src.storage.mongo import get_client
 
 
 def md5(text: str) -> str:
@@ -46,13 +47,14 @@ class MongoDocStore:
 
         self.uri = uri or env["MONGO_URI"]
         self.db_name = db_name or env["MONGO_DB"]
-        self.client = pymongo.MongoClient(self.uri, serverSelectionTimeoutMS=5000)
+        self.client = get_client(self.uri)
         self.db = self.client[self.db_name]
         self.col = self.db["nodes"]
         # 建立索引：node_id 唯一；按租户/文档聚合查询加速
         self.col.create_index("node_id", unique=True)
         self.col.create_index([("ref_doc_id", 1), ("doc_version", 1)])
         self.col.create_index("tenant")
+        self.col.create_index("datasource_id")
 
     # ---------- 写入 ----------
 
@@ -64,9 +66,18 @@ class MongoDocStore:
         self.col.replace_one({"_id": node["_id"]}, node, upsert=True)
 
     def put_nodes(self, nodes: List[Dict[str, Any]]) -> int:
-        """批量写入，返回写入数量。"""
+        """批量写入（bulk_write，一次网络往返），远快于逐条 upsert。"""
+        if not nodes:
+            return 0
+        from pymongo import ReplaceOne
+
+        ops = []
         for node in nodes:
-            self.put_node(node)
+            n = dict(node)
+            n["_id"] = n["node_id"]
+            n.setdefault("created_at", time.time())
+            ops.append(ReplaceOne({"_id": n["_id"]}, n, upsert=True))
+        self.col.bulk_write(ops, ordered=False)
         return len(nodes)
 
     # ---------- 读取 ----------

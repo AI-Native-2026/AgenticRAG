@@ -31,6 +31,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # 允许
 from src.config import get_env
 from src.queue.base import Producer, new_message_id
 
+# 进程级复用：避免每次提交都新建 Kafka 生产者（建连开销大）
+_PRODUCERS: Dict[str, Producer] = {}
+
+
+def _shared_producer(backend_name: str) -> Producer:
+    if backend_name not in _PRODUCERS:
+        from src.queue.dev_backend import get_backend
+
+        _PRODUCERS[backend_name] = get_backend(backend_name)["producer"]()
+    return _PRODUCERS[backend_name]
+
 
 class DocumentProducer:
     """把文档变更发布到队列。"""
@@ -38,14 +49,11 @@ class DocumentProducer:
     def __init__(self, producer: Optional[Producer] = None):
         env = get_env()
         self.env = env
-        self.producer = producer or self._make_producer()
+        self.producer = producer or _shared_producer(env["QUEUE_BACKEND"])
         self.topic = env["TOPIC_DOC_INGEST"]
 
     def _make_producer(self) -> Producer:
-        from src.queue.dev_backend import get_backend
-
-        backend = get_backend(self.env["QUEUE_BACKEND"])
-        return backend["producer"]()
+        return _shared_producer(self.env["QUEUE_BACKEND"])
 
     def publish_docs(self, docs: List[Dict[str, str]], request_id: str = "cli") -> int:
         """把一批文档发布进队列，返回发布数量。

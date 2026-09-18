@@ -42,16 +42,25 @@ class Chunker:
         env = get_env()
         self.chunk_size = chunk_size or int(env["CHUNK_SIZE"])
         self.chunk_overlap = chunk_overlap or int(env["CHUNK_OVERLAP"])
+        self._splitter = None
+
+    @property
+    def splitter(self):
+        """复用同一个 SentenceSplitter 实例（构造有开销）。"""
+        if self._splitter is None:
+            from llama_index.core.node_parser import SentenceSplitter
+
+            self._splitter = SentenceSplitter(
+                chunk_size=self.chunk_size,
+                chunk_overlap=self.chunk_overlap,
+            )
+        return self._splitter
 
     def recursive_split(self, doc: Dict[str, str], doc_version: int = 1) -> List[Dict]:
         """LlamaIndex SentenceSplitter：按句子边界递归切分，保持语义完整。"""
         from llama_index.core import Document
-        from llama_index.core.node_parser import SentenceSplitter
 
-        splitter = SentenceSplitter(
-            chunk_size=self.chunk_size,
-            chunk_overlap=self.chunk_overlap,
-        )
+        splitter = self.splitter
         doc_obj = Document(
             text=doc["text"],
             metadata={"doc_name": doc["doc_name"]},
