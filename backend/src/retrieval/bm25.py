@@ -55,9 +55,14 @@ class BM25Retriever:
         for i in ranked:
             nid = self.doc_ids[i]
             node = self.node_map.get(nid, {})
+            # 归一化元数据：合并顶层字段(tenant/datasource_id 等)与 metadata，
+            # 供上层做租户/范围过滤（避免跨租户泄漏）
+            meta = dict(node.get("metadata", {}) or {})
+            for k in ("tenant", "datasource_id", "doc_name", "source_type", "doc_type", "doc_version"):
+                if node.get(k) is not None:
+                    meta[k] = node.get(k)
             out.append({"node_id": nid, "score": float(scores[i]),
-                        "text": node.get("text", ""),
-                        "metadata": node.get("metadata", {})})
+                        "text": node.get("text", ""), "metadata": meta})
         return out
 
 

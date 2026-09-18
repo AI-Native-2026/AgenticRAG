@@ -155,27 +155,78 @@ def extract_pdf(path: Path, config: Dict[str, Any],
 
 # ---------- Office ----------
 
+def _extract_docx(path: Path) -> str:
+    """python-docx：段落 + 表格（转 Markdown）。"""
+    import docx
+
+    d = docx.Document(str(path))
+    blocks: List[str] = []
+    for p in d.paragraphs:
+        t = (p.text or "").strip()
+        if t:
+            blocks.append(t)
+    for tbl in d.tables:
+        rows = [[c.text.strip() for c in row.cells] for row in tbl.rows]
+        md = table_to_markdown(rows)
+        if md:
+            blocks.append("【表格】\n" + md)
+    return "\n\n".join(blocks)
+
+
+def _extract_pptx(path: Path) -> str:
+    """python-pptx：逐页文本框 + 表格。"""
+    from pptx import Presentation
+
+    prs = Presentation(str(path))
+    blocks: List[str] = []
+    for i, slide in enumerate(prs.slides):
+        parts: List[str] = []
+        for shape in slide.shapes:
+            if getattr(shape, "has_text_frame", False) and shape.text_frame.text.strip():
+                parts.append(shape.text_frame.text.strip())
+            if getattr(shape, "has_table", False) and shape.has_table:
+                rows = [[c.text for c in row.cells] for row in shape.table.rows]
+                parts.append("【表格】\n" + table_to_markdown(rows))
+        if parts:
+            blocks.append(f"## 幻灯片 {i + 1}\n" + "\n".join(parts))
+    return "\n\n".join(blocks)
+
+
 def extract_office(path: Path) -> List[Tuple[int, str, Dict[str, Any]]]:
-    """docx/pptx：优先 unstructured（能抽表格），失败回退 llama-index。"""
+    """docx/pptx：优先 python-docx / python-pptx（稳定、无重依赖），失败回退。"""
+    suffix = path.suffix.lower()
+    try:
+        if suffix == ".docx":
+            text = _extract_docx(path)
+        elif suffix == ".pptx":
+            text = _extract_pptx(path)
+        else:
+            text = ""
+        if text.strip():
+            return [(1, text, {"modality": "document"})]
+    except Exception as e:  # noqa: BLE001
+        logger.warning("python-docx/pptx 解析失败，回退：%s", e)
+
+    # 回退 1：unstructured（若可用）
     try:
         from unstructured.partition.auto import partition
 
         elements = partition(filename=str(path))
-        blocks: List[str] = []
+        blocks = []
         for el in elements:
-            cat = getattr(el, "category", "")
             txt = str(el).strip()
             if not txt:
                 continue
-            if "Table" in cat:
-                blocks.append("【表格】\n" + txt)
-            else:
-                blocks.append(txt)
+            cat = getattr(el, "category", "")
+            blocks.append(("【表格】\n" + txt) if "Table" in cat else txt)
         text = "\n\n".join(blocks)
         if text.strip():
             return [(1, text, {"modality": "document"})]
     except Exception as e:  # noqa: BLE001
-        logger.warning("unstructured 解析失败，回退 llama-index: %s", e)
+        logger.warning("unstructured 解析失败，回退 llama-index：%s", e)
+
+    # 回退 2：llama-index
     from llama_index.core import SimpleDirectoryReader
+
     docs = SimpleDirectoryReader(input_files=[str(path)]).load_data()
     return [(i + 1, d.text, {"modality": "document", "part": i}) for i, d in enumerate(docs)]

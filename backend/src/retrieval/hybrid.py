@@ -31,6 +31,20 @@ logger = logging.getLogger(__name__)
 RRF_K = 60  # RRF 常数
 
 
+def _match(meta: Dict[str, Any], where: Dict[str, Any]) -> bool:
+    """判断一条命中的 metadata 是否满足过滤条件（支持等值与 $in）。"""
+    for k, v in where.items():
+        mv = meta.get(k)
+        if isinstance(v, dict):
+            if "$in" in v and mv not in (v["$in"] or []):
+                return False
+            if "$ne" in v and mv == v["$ne"]:
+                return False
+        elif mv != v:
+            return False
+    return True
+
+
 class HybridRetriever:
     """向量 + BM25 混合召回器。"""
 
@@ -94,6 +108,11 @@ class HybridRetriever:
             vec_hits = f_vec.result()
             bm_hits = f_bm.result()
         logger.debug("召回：向量 %d / BM25 %d", len(vec_hits), len(bm_hits))
+
+        # 统一按 where 过滤（BM25 是全局索引，必须过滤，否则跨租户泄漏）
+        if where:
+            vec_hits = [h for h in vec_hits if _match(h.get("metadata") or {}, where)]
+            bm_hits = [h for h in bm_hits if _match(h.get("metadata") or {}, where)]
 
         # 3) RRF 融合
         rrf: Dict[str, Dict] = {}
