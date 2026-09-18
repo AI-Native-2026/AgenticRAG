@@ -64,7 +64,10 @@ class DocumentProducer:
                     "ref_doc_id": doc["ref_doc_id"],
                     "doc_name": doc["doc_name"],
                     "tenant": doc["tenant"],
-                    "doc_type": doc["doc_type"],
+                    "doc_type": doc.get("doc_type", "text"),
+                    "source_type": doc.get("source_type", "file"),
+                    "datasource_id": doc.get("datasource_id"),
+                    "metadata": doc.get("metadata") or {},
                     "text": doc["text"],
                     "op": "add",
                     "version": -1,  # 由消费端 dedup 裁决（-1 表示未知）

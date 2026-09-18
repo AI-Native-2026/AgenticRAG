@@ -79,7 +79,8 @@ class DocumentConsumer:
         from src.queue.dev_backend import get_backend
 
         backend = get_backend(self.env["QUEUE_BACKEND"])
-        return backend["consumer"]([self.env["TOPIC_DOC_INGEST"]], group_id="ingest-group")
+        return backend["consumer"]([self.env["TOPIC_DOC_INGEST"]],
+                                   group_id=self.env.get("CONSUMER_GROUP", "ingest-group"))
 
     def _make_producer_for_dlq(self):
         from src.queue.dev_backend import get_backend
@@ -93,18 +94,44 @@ class DocumentConsumer:
         """主循环：拉取 → 处理 → 提交。注册信号处理以支持优雅停机。"""
         signal.signal(signal.SIGTERM, self._handle_signal)
         signal.signal(signal.SIGINT, self._handle_signal)
-        print(f"[consumer] 启动，topic={self.env['TOPIC_DOC_INGEST']} group=ingest-group")
+        print(f"[consumer] 启动，topic={self.env['TOPIC_DOC_INGEST']} group={self.env.get('CONSUMER_GROUP', 'ingest-group')}")
 
         while not self._stop:
             messages = self.consumer.poll(timeout_ms=1000)
             for msg in messages:
-                try:
-                    self._process(msg)
+                ok = self._process_with_retry(msg)
+                if ok:
                     self.consumer.commit([msg])
-                except Exception as e:  # noqa: BLE001 —— 单条消息失败不让进程崩溃
-                    print(f"[consumer] 消息失败 {msg} : {e}")
+                else:
+                    # 已重试耗尽 → 进死信，提交偏移避免毒消息卡死分区
+                    self._to_dlq(msg, "retry exhausted")
+                    self.consumer.commit([msg])
         self.consumer.close()
         print("[consumer] 已优雅退出")
+
+    def _process_with_retry(self, msg: Message) -> bool:
+        """单条消息重试 MAX_RETRY_DOC 次；成功 True，耗尽 False。"""
+        for attempt in range(1, self.max_retry + 1):
+            try:
+                self._process(msg)
+                return True
+            except Exception as e:  # noqa: BLE001
+                print(f"[consumer] 处理失败 attempt={attempt}/{self.max_retry} msg={msg.key}: {e}")
+                time.sleep(min(2 ** attempt * 0.2, 3.0))
+        return False
+
+    def _to_dlq(self, msg: Message, reason: str) -> None:
+        """把失败消息投递到死信 topic。"""
+        try:
+            self.dlq.produce(
+                topic=self.dlq_topic,
+                key=msg.key,
+                value={**(msg.value or {}), "error": reason, "failed_at": time.time()},
+            )
+            self.dlq.flush()
+            print(f"[consumer] 已投递死信 topic={self.dlq_topic} key={msg.key}")
+        except Exception as e:  # noqa: BLE001
+            print(f"[consumer] 死信投递失败: {e}")
 
     def _handle_signal(self, signum, frame):
         print(f"[consumer] 收到信号 {signum}，开始优雅停机…")

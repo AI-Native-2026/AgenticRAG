@@ -160,11 +160,11 @@ def preview(request: Request, ds_id: str, resource: Optional[str] = None, limit:
         conn.close()
 
 
-def _run_sync(svc, ds_id: str, mode: str, limit: Optional[int]) -> None:
+def _run_sync(svc, ds_id: str, mode: str, limit: Optional[int], job_id: Optional[str] = None) -> None:
     raw = svc.datasource_store.get_raw(ds_id)
     svc.datasource_store.set_status(ds_id, "syncing")
     try:
-        svc.sync_service.sync_datasource(raw, mode=mode, limit=limit)
+        svc.sync_service.sync_datasource(raw, mode=mode, limit=limit, job_id=job_id)
     except Exception:  # noqa: BLE001
         svc.datasource_store.set_status(ds_id, "error")
     finally:
@@ -177,5 +177,5 @@ def sync(request: Request, ds_id: str, body: SyncRequest, background: Background
     svc = request.app.state.svc
     _owned(svc, ds_id, user)
     job = svc.job_store.create(ds_id, user["tenant"], mode=body.mode)
-    background.add_task(_run_sync, svc, ds_id, body.mode, body.limit)
+    background.add_task(_run_sync, svc, ds_id, body.mode, body.limit, job["job_id"])
     return {"job_id": job["job_id"], "status": "pending"}

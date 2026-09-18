@@ -43,5 +43,5 @@ def retry_job(request: Request, job_id: str, background: BackgroundTasks):
     if user["role"] != "admin" and job["tenant"] != user["tenant"]:
         raise AppError(403, "FORBIDDEN", "无权操作")
     new_job = svc.job_store.create(job["datasource_id"], job["tenant"], mode=job.get("mode", "full"))
-    background.add_task(_run_sync, svc, job["datasource_id"], job.get("mode", "full"), None)
+    background.add_task(_run_sync, svc, job["datasource_id"], job.get("mode", "full"), None, new_job["job_id"])
     return {"job_id": new_job["job_id"], "status": "pending"}
