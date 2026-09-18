@@ -68,8 +68,13 @@ def search(request: Request, body: RetrievalRequest):
 
 
 @router.post("/retrieval/search-by-image")
-async def search_by_image(request: Request, file: UploadFile = File(...), top_n: int = 5):
-    """以图搜图：上传图片 → 多模态向量 → 视觉相似检索。"""
+async def search_by_image(request: Request, file: UploadFile = File(...), top_n: int = 5,
+                          modality: str = ""):
+    """以图搜图 / 以图搜内容。
+
+    - modality=image：只返回图片（视觉相似图片）
+    - modality 为空：返回所有类型（图片 / 文本 / 表格）中与图片语义相似的内容
+    """
     user = get_bearer(request)
     svc = request.app.state.svc
     embedder = svc.embedder
@@ -85,7 +90,12 @@ async def search_by_image(request: Request, file: UploadFile = File(...), top_n:
             f.write(await file.read())
         q_emb = embedder.embed_items([{"modality": "image", "media_path": tmp}])[0]
         where = _where_for(svc, user)
-        hits = svc.vector_store.query(q_emb, top_k=max(1, top_n), where=where)
+        # 需要按类型过滤时多召回一些，过滤后再截断
+        k = top_n if not modality else max(top_n * 5, 20)
+        hits = svc.vector_store.query(q_emb, top_k=k, where=where)
+        if modality:
+            hits = [h for h in hits if (h.get("metadata") or {}).get("modality") == modality]
+        hits = hits[:top_n]
         results = [{
             "rank": i + 1, "node_id": h["node_id"], "text": h["text"],
             "doc_name": (h.get("metadata") or {}).get("doc_name", ""),
@@ -95,7 +105,7 @@ async def search_by_image(request: Request, file: UploadFile = File(...), top_n:
             "media_path": (h.get("metadata") or {}).get("media_path", ""),
             "vector_score": h.get("score"),
         } for i, h in enumerate(hits)]
-        return {"query_image": file.filename, "results": results}
+        return {"query_image": file.filename, "modality": modality or "all", "results": results}
     finally:
         try:
             os.remove(tmp)

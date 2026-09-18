@@ -1,20 +1,23 @@
 import { useEffect, useRef, useState } from 'react'
-import { Plus, Send, Trash2, Image as ImageIcon, X } from 'lucide-react'
+import { Plus, Send, Trash2, Image as ImageIcon, X, Search } from 'lucide-react'
 import { api, chatStream, searchByImage } from '@/api/client'
 import { toast } from '@/store/toast'
+import { Modal } from '@/components/ui'
 import MarkdownView from '@/components/MarkdownView'
 import KnowledgeScope from '@/components/KnowledgeScope'
 import AuthImage from '@/components/AuthImage'
 
 interface ToolStep { tool: string; ok?: boolean; duration_ms?: number; detail?: string }
 interface Source { node_id: string; doc_name: string; modality?: string; page?: number | string; score?: number }
-interface ImageHit { node_id: string; doc_name: string; modality?: string; vector_score?: number }
+interface ImageHit { node_id: string; doc_name: string; modality?: string; vector_score?: number; text?: string }
 interface Message {
   role: 'user' | 'bot'
   content: string
   steps: ToolStep[]
   sources?: Source[]
   image?: string
+  imageFile?: File
+  askImage?: boolean
   imageResults?: ImageHit[]
   streaming?: boolean
 }
@@ -38,6 +41,7 @@ export default function Chat() {
   const [selectedKbs, setSelectedKbs] = useState<string[]>([])
   const [imgBusy, setImgBusy] = useState(false)
   const [pendingImage, setPendingImage] = useState<{ file: File; url: string } | null>(null)
+  const [zoom, setZoom] = useState<string | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const imgRef = useRef<HTMLInputElement>(null)
 
@@ -112,7 +116,7 @@ export default function Chat() {
       const caption = input.trim()
       setPendingImage(null)
       setInput('')
-      await runImageSearch(file, url, caption)
+      askImageChoice(file, url, caption)
       return
     }
     const q = input.trim()
@@ -163,23 +167,29 @@ export default function Chat() {
     setPendingImage({ file, url: URL.createObjectURL(file) })
   }
 
-  async function runImageSearch(file: File, url: string, caption: string) {
+  function askImageChoice(file: File, url: string, caption: string) {
     setMessages((m) => [...m,
       { role: 'user', content: caption, steps: [], image: url },
-      { role: 'bot', content: '', steps: [], streaming: true }])
+      { role: 'bot', content: '你想怎么处理这张图片？', steps: [], askImage: true, imageFile: file }])
     scrollDown()
+  }
+
+  async function chooseImageMode(file: File, mode: 'image' | 'content') {
+    updateBot((msg) => ({ ...msg, askImage: false, streaming: true, content: '' }))
     setImgBusy(true)
     try {
-      const r = await searchByImage(file, 6)
+      const r = await searchByImage(file, 8, mode === 'image' ? 'image' : undefined)
       const hits: ImageHit[] = r.results || []
       updateBot((msg) => ({
         ...msg,
         streaming: false,
-        content: hits.length ? `为你找到 ${hits.length} 张相似图片：` : '未找到相似图片。',
+        content: mode === 'image'
+          ? (hits.length ? `找到 ${hits.length} 张相似图片：` : '未找到相似图片。')
+          : (hits.length ? `找到 ${hits.length} 条与图片相似的内容：` : '未找到相似内容。'),
         imageResults: hits,
       }))
     } catch (e: any) {
-      updateBot((msg) => ({ ...msg, streaming: false, content: `以图搜图失败：${e.message}` }))
+      updateBot((msg) => ({ ...msg, streaming: false, content: `检索失败：${e.message}` }))
       toast.err(e.message)
     } finally {
       setImgBusy(false)
@@ -210,15 +220,38 @@ export default function Chat() {
                         ? <MarkdownView content={m.content} />
                         : (m.streaming ? <span className="typing"><span /><span /><span /></span> : '')}
                   </div>
+                  {m.role === 'bot' && m.askImage && m.imageFile && (
+                    <div className="row" style={{ gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+                      <button className="btn btn-p btn-sm" disabled={imgBusy}
+                        onClick={() => chooseImageMode(m.imageFile!, 'image')}>
+                        <ImageIcon size={14} /> 以图搜图（相似图片）
+                      </button>
+                      <button className="btn btn-o btn-sm" disabled={imgBusy}
+                        onClick={() => chooseImageMode(m.imageFile!, 'content')}>
+                        <Search size={14} /> 检索相似内容（全部类型）
+                      </button>
+                    </div>
+                  )}
                   {m.role === 'bot' && m.imageResults && m.imageResults.length > 0 && (
-                    <div className="img-grid">
+                    <div className="media-results">
                       {m.imageResults.map((h) => (
-                        <div className="img-card" key={h.node_id}>
-                          <AuthImage nodeId={h.node_id} alt={h.doc_name}
-                            style={{ width: '100%', height: 120, objectFit: 'cover', borderRadius: 8 }} />
-                          <div className="img-meta">
-                            <span>{h.doc_name}</span>
-                            {h.vector_score != null && <span className="score">{(h.vector_score * 100).toFixed(1)}%</span>}
+                        <div className="media-item" key={h.node_id}>
+                          {h.modality === 'image' ? (
+                            <button className="media-thumb" onClick={() => setZoom(h.node_id)} title="点击查看大图">
+                              <AuthImage nodeId={h.node_id} alt={h.doc_name}
+                                style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+                            </button>
+                          ) : (
+                            <div className="media-thumb media-thumb-txt">{h.modality || 'text'}</div>
+                          )}
+                          <div className="media-body">
+                            <div className="row" style={{ gap: 8 }}>
+                              <span className="tag">{h.modality === 'image' ? '图片' : (h.modality || 'text')}</span>
+                              <b style={{ fontSize: 12.5 }}>{h.doc_name}</b>
+                              <span className="spacer" />
+                              {h.vector_score != null && <span className="score">{(h.vector_score * 100).toFixed(1)}%</span>}
+                            </div>
+                            {h.text && <div className="txt">{h.text}</div>}
                           </div>
                         </div>
                       ))}
@@ -296,6 +329,12 @@ export default function Chat() {
           </div>
         </aside>
       </div>
+
+      <Modal open={!!zoom} title="图片预览" onClose={() => setZoom(null)} width={780}>
+        {zoom && (
+          <AuthImage nodeId={zoom} style={{ width: '100%', maxHeight: '72vh', objectFit: 'contain', background: 'var(--panel-2)', borderRadius: 10 }} />
+        )}
+      </Modal>
     </>
   )
 }

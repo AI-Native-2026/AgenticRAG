@@ -48,7 +48,7 @@ export default function Retrieval() {
     setLoading(true)
     setPreview(URL.createObjectURL(file))
     try {
-      const r = await searchByImage(file, topN)
+      const r = await searchByImage(file, topN, 'image')
       setImgResp(r)
     } catch (e: any) {
       toast.err(e.message)
@@ -145,7 +145,7 @@ export default function Retrieval() {
                     </div>
                     {r.modality === 'image' && (
                       <div style={{ marginBottom: 8 }}>
-                        <AuthImage nodeId={r.node_id} alt={r.doc_name} style={{ maxWidth: 320, maxHeight: 220, borderRadius: 8, border: '1px solid var(--border)' }} />
+                        <AuthImage nodeId={r.node_id} alt={r.doc_name} style={{ maxWidth: 360, maxHeight: 240, objectFit: 'contain', background: 'var(--panel-2)', borderRadius: 8, border: '1px solid var(--border)' }} />
                       </div>
                     )}
                     <div className="txt">{r.text}</div>

@@ -68,11 +68,13 @@ export const api = {
   del: <T>(p: string) => request<T>(p, { method: 'DELETE' }),
 }
 
-/** 以图搜图：上传图片 → 视觉相似检索。 */
-export async function searchByImage(file: File, topN = 5): Promise<any> {
+/** 以图搜图 / 以图搜内容。modality='image' 只返回图片，省略则返回所有类型。 */
+export async function searchByImage(file: File, topN = 5, modality?: string): Promise<any> {
   const form = new FormData()
   form.append('file', file)
-  const res = await fetch(`/v1/retrieval/search-by-image?top_n=${topN}`, {
+  const q = new URLSearchParams({ top_n: String(topN) })
+  if (modality) q.set('modality', modality)
+  const res = await fetch(`/v1/retrieval/search-by-image?${q.toString()}`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${getToken()}` },
     body: form,
